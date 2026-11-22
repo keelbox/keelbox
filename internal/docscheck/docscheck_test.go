@@ -52,7 +52,7 @@ var userPages = []page{
 	{path: "guides/previews.md", title: "Preview a dev server", words: 450},
 	{path: "guides/agents-here.md", title: "Your computer's agents and your boxes", words: 450},
 	// Look after it
-	{path: "guides/troubleshooting.md", title: "Check the box and fix problems", words: 300, until: "Problems", entry: 120},
+	{path: "guides/troubleshooting.md", title: "Check the box and fix problems", words: 300, until: "Connecting", entry: 120},
 	{path: "guides/upgrades.md", title: "Update keelbox and the agent CLIs", words: 600},
 	{path: "guides/backups.md", title: "Back up and restore", words: 500},
 	{path: "guides/notifications.md", title: "Notifications", words: 350},

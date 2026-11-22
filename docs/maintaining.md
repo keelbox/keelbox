@@ -1,5 +1,7 @@
 # Maintaining keelbox
 
+<!-- site: exclude -->
+
 Runbooks for releases, triage and repository settings. They are written so an agent can follow them step by step; the matching skills are `.agents/skills/release` and `.agents/skills/triage`. A human maintainer (@nickmartink) approves every merge, release and promotion.
 
 ## Release

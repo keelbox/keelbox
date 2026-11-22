@@ -1,63 +1,40 @@
 # Attach, leave and come back
 
 ```sh
-keelbox attach acme                     # session main, created if missing
-keelbox attach acme --session review    # another session
-keelbox sessions acme                   # list them
+keelbox attach acme                     # open session main, creating it if missing
+keelbox attach acme --session review    # open or create another session
+keelbox sessions acme                   # list the sessions
 keelbox ssh acme                        # a shell as the agent, outside tmux
 ```
 
-Agents work in tmux sessions on the box, as the agent: the account without sudo that the agent CLIs run as. In a session, type `claude` or `codex` to start an agent.
-
-A session name is letters, digits, `.`, `_` and `-`.
+Agents work in tmux sessions on the box, as the agent: the account without sudo that the agent CLIs run as. Type `claude` or `codex` in a session to start one.
 
 ## Leave
 
-A session's status line has the box's name on the left and the keys that leave on the right: `Ctrl-b d`. Hold `Ctrl` and press `b`, let go, then press `d`.
+Press `Ctrl-b`, let go, then press `d`. The session keeps running on the box, as it does when you close the terminal or lose the connection. After a dropped connection, `keelbox attach` waits for the box and reopens the session.
 
-The session, and every program in it, keeps running on the box. Closing the terminal window or losing the connection leaves it running in the same way.
+`exit` or `Ctrl-d` ends the shell, and the session with it if that was its last window.
 
-When the connection is lost, as when a laptop sleeps or changes network, `keelbox attach` waits for the box to answer and opens the session again. `Ctrl-c` stops the wait.
-
-`exit` and `Ctrl-d` end the shell you are in, and the session with it when that was its last window.
-
-`keelbox attach acme` comes back, from any computer that has the box's config.
+To come back, run `keelbox attach acme` from any computer that has the box's config.
 
 | Keys | What they do |
 |---|---|
-| `Ctrl-b c` | A new window, in the current directory |
-| `Ctrl-b "` | Split below |
-| `Ctrl-b %` | Split beside |
-| `Ctrl-b r` | Read `~/.tmux.conf` again |
+| `Ctrl-b c` | A new window |
+| `Ctrl-b "` / `Ctrl-b %` | Split below / beside |
+| `Ctrl-b r` | Reload `~/.tmux.conf` |
 
-The mouse is on: click a window's name, drag a pane border, scroll.
+The mouse works for windows, pane borders and scrolling.
 
 ## The welcome
 
-A new session starts with a few lines above its first prompt.
+A new session prints a few lines on how to start an agent, leave, come back, get a package and reach root. It does not print again for a session restored after a reboot. Turn it off with `sessions.welcome: false` and `keelbox apply acme`.
 
-```text
-  devbox-2  ·  you are the agent, an account without sudo  ·  Ubuntu 24.04
-  Start an agent   claude    codex
-  Your work        ~/projects
-  Leave            Ctrl-b then d: everything here keeps running
-  Come back        keelbox attach devbox-2   (from your computer)
-  Packages         keelbox install NAME: an Ubuntu package, without sudo
-  Need root?       from your computer: keelbox ssh devbox-2 --admin
-```
-
-The Packages line follows `users.agent.permissions`. With `manual` it names `keelbox requests`, and with `full` both lines are left out.
-
-It prints once for each new session, in its first window. A session restored after a reboot does not print it again, and a terminal under 36 columns gets none.
-
-`sessions.welcome: false` in the config, then `keelbox apply acme`, turns it off. The status line stays.
-
-The agent's own tmux and shell draw the status line and the welcome, from files the agent can change. Neither is a check of the box; `keelbox doctor acme` reads the box as root.
+The welcome and status line come from files the agent can change, so they are not a check of the box. `keelbox doctor acme` is.
 
 ## From a phone
 
-1. Put the phone on the same tailnet as the box. A tailnet is the private Tailscale network between your devices.
-2. Generate an SSH key in the phone's SSH app, add its public key to the box's config, and run `keelbox apply acme`.
+1. Put the phone on the box's tailnet, the private Tailscale network between your devices.
+2. Generate an SSH key in the phone's SSH app, add the public key to the config and run `keelbox apply acme`:
 
    ```yaml
    users:
@@ -66,25 +43,16 @@ The agent's own tmux and shell draw the status line and the welcome, from files 
          - ssh-ed25519 AAAA... phone
    ```
 
-3. Connect to `agent@acme`. The login lists the running sessions.
-4. `tmux new -A -s main` attaches to `main`.
+3. Connect to `agent@acme` and run `tmux new -A -s main`.
 
-Until [public SSH closes](public-ssh.md), the phone also reaches the box at its public address.
-
-[The Claude app](remote-control.md) starts Claude Code sessions on the box without SSH.
+To start Claude Code sessions without SSH, use [the Claude app](remote-control.md).
 
 ## After a reboot
 
-keelbox saves each session's windows, panes and working directories every 15 minutes. At boot the agent's tmux server starts and restores the last save, and a session `main` always exists.
+keelbox saves each session's windows, panes and directories every 15 minutes and restores them at boot. Programs in them do not restart, except Claude Code and Codex after a reboot keelbox made ([auto_reboot](../reference/config.md#auto_reboot)). Otherwise run `claude --continue` or `codex resume`.
 
-Programs that were running are not started again, except Claude Code and Codex after a reboot by keelbox: [auto_reboot](../reference/config.md#auto_reboot). Otherwise `claude --continue` and `codex resume` are the CLIs' own commands that pick a conversation up.
-
-Every two minutes the box checks that the agent's tmux server runs. If it is gone, the box starts it and restores the last save. `keelbox status acme` shows the last such restart.
-
-The keys are `sessions.recovery`, `sessions.start_on_boot` and `sessions.watchdog` in the [config](../reference/config.md#sessions), each on unless set to `false`.
+Every two minutes the box restarts the agent's tmux server if it has stopped. `keelbox status acme` shows the last restart. The [`sessions`](../reference/config.md#sessions) keys turn each part off.
 
 ## Your own tmux settings
 
-`~/.tmux.conf` is yours. Its `source-file` line loads keelbox's settings from `~/.config/tmux/keelbox.conf`, which apply keeps as keelbox wrote it. Settings after that line replace keelbox's, and `Ctrl-b r` loads them.
-
-Add hooks with `set-hook -ga`. `set-hook -g session-created` or `set-hook -g client-attached` replaces keelbox's hook, and the welcome goes with it.
+Put your settings in `~/.tmux.conf` after its `source-file` line, which loads keelbox's. Add hooks with `set-hook -ga`: a plain `set-hook -g` on `session-created` or `client-attached` replaces keelbox's hook and the welcome with it.
