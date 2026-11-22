@@ -1,0 +1,32 @@
+       [38;5;59m│[0m[38;5;109m▙[0m
+      [38;5;109m▟[0m[38;5;59m│[0m[38;5;109m█▙[0m         [1mkeelbox[0m  [38;5;109m0.1.0[0m
+     [38;5;109m▟█[0m[38;5;59m│[0m[38;5;109m██▙[0m        [38;5;109mSets up Ubuntu machines for AI coding agents.[0m
+   [38;5;179m▜█████████▛[0m     [38;5;59mCharted at [0m[38;5;110mhttps://keelbox.dev[0m
+  [38;5;110m╌╌╌╌╌╌╌╌╌╌╌╌╌[0m
+
+[38;5;109mStep 2 of 7[0m[38;5;59m · [0m[1mHetzner token[0m [38;5;59m────────────────────────────────────────────────────────────[0m
+[38;5;59m╭─[0m [1;38;5;179mAbout to set up acme[0m [38;5;59m───────────────────────────────────────────────────────────────╮[0m
+[38;5;59m│[0m [38;5;109mwhere[0m       a new Hetzner server, cx23 in fsn1, ubuntu-24.04                         [38;5;59m│[0m
+[38;5;59m│[0m [38;5;109mcost[0m        [1mEUR 3.79 a month[0m or EUR 0.0060 an hour with VAT, billed by Hetzner until [38;5;59m│[0m
+[38;5;59m│[0m             [38;5;179mkeelbox destroy acme[0m                                                     [38;5;59m│[0m
+[38;5;59m│[0m [38;5;109magents[0m      claude-code, codex                                                       [38;5;59m│[0m
+[38;5;59m│[0m [38;5;109maccess[0m      Tailscale; SSH from outside the tailnet, your LAN included, closes once  [38;5;59m│[0m
+[38;5;59m│[0m             keelbox reaches the box over it                                          [38;5;59m│[0m
+[38;5;59m│[0m             [38;5;109m(a value carried on under the row before)[0m                                [38;5;59m│[0m
+[38;5;59m│[0m                                                                                      [38;5;59m│[0m
+[38;5;59m│[0m [38;5;109mkeelbox hardens the server: no SSH passwords or root login, a firewall, an admin and[0m [38;5;59m│[0m
+[38;5;59m│[0m [38;5;109man agent account, the image's default account locked.[0m                                [38;5;59m│[0m
+[38;5;59m╰──────────────────────────────────────────────────────────────────────────────────────╯[0m
+
+[1;38;5;179mAccess[0m [38;5;59m─────────────────────────────────────────────────────────────────────────────────[0m
+  [38;5;209m✗[0m [38;5;209m[1mThe last apply did not finish[0m[0m
+    Fix the cause above.
+    [38;5;179m→[0m [38;5;179mkeelbox up acme[0m
+  [38;5;109m-[0m [1mStopped between two steps, so nothing is half-done[0m
+    [38;5;179m→[0m [38;5;179mkeelbox up acme[0m
+  [38;5;222m![0m [38;5;222m[1mClaude Code Remote Control does not stay running[0m[0m
+    keelbox doctor says why.
+    [38;5;179m→[0m [38;5;179mkeelbox doctor acme[0m
+[38;5;109mBOX[0m         [38;5;109mSTATUS[0m
+[1macme[0m        [38;5;79m✓[0m ready
+lab-server  waiting

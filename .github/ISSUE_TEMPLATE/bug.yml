@@ -1,0 +1,46 @@
+name: Bug report
+description: keelbox did something wrong or failed on a box.
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: Security problems go to security@keelbox.dev or a private advisory, not here (see SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The command's output, or `keelbox doctor`. Remove hostnames or keys you do not want public.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: keelbox version
+      description: Output of `keelbox version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options: [local, ssh, hetzner, aws, digitalocean, gcp, "ssh, on a server made from the cloud-config snippet"]
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Box and laptop
+      placeholder: Ubuntu 26.04 arm64 box, macOS 26 laptop
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I can reproduce this on the latest release (`keelbox self-update`).
+          required: true

@@ -1,0 +1,19 @@
+
+  ✓ workstation is set up                                                    in 2m05s
+
+  Claude Code and Codex are installed and run as the agent, an account without sudo
+  that can install Ubuntu packages (keelbox install). The box is this machine. It
+  is on your tailnet. SSH from the internet closes once keelbox apply workstation
+  reaches it over the tailnet from another computer; keelbox doctor workstation
+  says whether it has.
+
+╭─ Start working ───────────────────────────────────────────────────────────────────╮
+│ This computer   keelbox attach workstation                                        │
+│                 opens the agent's terminal on this machine. Close it and the work │
+│                 carries on; run it again to come back.                            │
+│                                                                                   │
+│ Phone over SSH  add your phone's key to the box first:                            │
+│                 https://keelbox.dev/docs/guides/sessions                          │
+╰───────────────────────────────────────────────────────────────────────────────────╯
+
+  Check the box   keelbox doctor workstation        all boxes: keelbox ls

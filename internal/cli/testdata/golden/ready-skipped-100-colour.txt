@@ -1,0 +1,33 @@
+
+  [38;5;79m✓[0m [1mdevbox-2 is set up[0m                                                          [38;5;109min 3m12s[0m
+
+  Claude Code and Codex are installed and run as the agent, an account without sudo
+  that can install Ubuntu packages (keelbox install). The box is not on your tailnet
+  yet, so SSH from the internet is still open. It closes after [38;5;179mkeelbox login devbox-2[0m
+  [38;5;179mtailscale[0m, then [38;5;179mkeelbox apply devbox-2[0m.
+
+[38;5;59m╭─[0m [1;38;5;179mStart working[0m [38;5;59m──────────────────────────────────────────────────────────────────────╮[0m
+[38;5;59m│[0m [38;5;109mThis computer[0m   [38;5;179mkeelbox attach devbox-2[0m                                              [38;5;59m│[0m
+[38;5;59m│[0m                 opens the agent's terminal on the box. Close it and the work carries [38;5;59m│[0m
+[38;5;59m│[0m                 on; run it again to come back.                                       [38;5;59m│[0m
+[38;5;59m│[0m                                                                                      [38;5;59m│[0m
+[38;5;59m│[0m [38;5;109mPhone over SSH[0m  [38;5;179mssh agent@203.0.113.7[0m from an SSH app, once your phone's key is on   [38;5;59m│[0m
+[38;5;59m│[0m                 the box:                                                             [38;5;59m│[0m
+[38;5;59m│[0m                 ]8;;https://keelbox.dev/docs/guides/sessions\[38;5;110mhttps://keelbox.dev/docs/guides/sessions[0m]8;;\                             [38;5;59m│[0m
+[38;5;59m╰──────────────────────────────────────────────────────────────────────────────────────╯[0m
+
+  [1;38;5;179mLeft to do[0m      join the tailnet: [38;5;179mkeelbox login devbox-2 tailscale[0m, then [38;5;179mkeelbox[0m
+                    [38;5;179mapply devbox-2[0m (closes public SSH)
+                  sign in to Claude Code (Remote Control starts after): [38;5;179mkeelbox login[0m
+                    [38;5;179mdevbox-2 claude-code[0m
+                  sign in to Codex: [38;5;179mkeelbox login devbox-2 codex[0m
+                  sign in to GitHub: [38;5;179mkeelbox login devbox-2 gh[0m (until then the agent's
+                    work stays on devbox-2, unless it is pushed another way or copied
+                    off)
+                  git identity: none in the config, and without one git on devbox-2
+                    refuses to commit. Add users.agent.git: {name: Your Name, email:
+                    you@example.com} to ~/.config/keelbox/boxes/devbox-2.yaml, then
+                    [38;5;179mkeelbox apply devbox-2[0m
+  [38;5;109mCheck the box[0m   [38;5;179mkeelbox doctor devbox-2[0m        [38;5;109mall boxes: [0m[38;5;179mkeelbox ls[0m
+  [38;5;109mAdmin shell[0m     [38;5;179mkeelbox ssh devbox-2 --admin[0m
+                  [38;5;109mfor anything that needs root; the agent has no sudo[0m

@@ -1,0 +1,10 @@
+? Where should the box run?
+    1  An existing server (SSH)
+       a home server, mini PC, VM or VPS you reach over SSH
+    2  This machine
+       set up the Ubuntu machine you are on, with sudo
+  › 3  A new Hetzner server
+       keelbox creates it through the Hetzner API (needs an API token)
+    4  A server I create myself (cloud-config)
+       any provider: paste a snippet keelbox prints, no token
+  ↑↓ move · 1-4 pick · Enter choose

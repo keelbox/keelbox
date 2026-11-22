@@ -1,0 +1,35 @@
+
+  ✓ devbox-2 is set up                                              in 3m12s
+
+  Claude Code and Codex are installed and run as the agent, an account
+  without sudo that can install Ubuntu packages (keelbox install). The box
+  is not on your tailnet yet, so SSH from the internet is still open. It
+  closes after keelbox login devbox-2 tailscale, then keelbox apply
+  devbox-2.
+
+╭─ Start working ──────────────────────────────────────────────────────────╮
+│ This computer   keelbox attach devbox-2                                  │
+│                 opens the agent's terminal on the box. Close it and the  │
+│                 work carries on; run it again to come back.              │
+│                                                                          │
+│ Phone over SSH  ssh agent@203.0.113.7 from an SSH app, once your phone's │
+│                 key is on the box:                                       │
+│                 https://keelbox.dev/docs/guides/sessions                 │
+╰──────────────────────────────────────────────────────────────────────────╯
+
+  Left to do      join the tailnet: keelbox login devbox-2 tailscale, then
+                    keelbox apply devbox-2 (closes public SSH)
+                  sign in to Claude Code (Remote Control starts after):
+                    keelbox login devbox-2 claude-code
+                  sign in to Codex: keelbox login devbox-2 codex
+                  sign in to GitHub: keelbox login devbox-2 gh (until then
+                    the agent's work stays on devbox-2, unless it is
+                    pushed another way or copied off)
+                  git identity: none in the config, and without one git on
+                    devbox-2 refuses to commit. Add users.agent.git:
+                    {name: Your Name, email: you@example.com} to
+                    ~/.config/keelbox/boxes/devbox-2.yaml, then keelbox
+                    apply devbox-2
+  Check the box   keelbox doctor devbox-2        all boxes: keelbox ls
+  Admin shell     keelbox ssh devbox-2 --admin
+                  for anything that needs root; the agent has no sudo

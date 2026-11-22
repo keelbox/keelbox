@@ -1,0 +1,30 @@
+name: Provider request
+description: Ask for keelbox to create or reach boxes on another cloud or platform.
+labels: [provider, needs-triage]
+body:
+  - type: input
+    id: provider
+    attributes:
+      label: Provider
+      placeholder: Azure, AWS EC2, Proxmox
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: Why `ssh` against a server you create yourself is not enough.
+    validations:
+      required: true
+  - type: textarea
+    id: api
+    attributes:
+      label: API and images
+      description: Links to the create/destroy API, Ubuntu 24.04 or 26.04 images, how SSH keys and user data are passed, and labels or tags for ownership.
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Contribution
+      options:
+        - label: I can test against an account on this provider.
+        - label: I would like to implement it.

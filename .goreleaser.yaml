@@ -1,0 +1,52 @@
+# Release build: static binaries for linux and darwin, amd64 and arm64,
+# reproducible from the tagged commit. Signing, SBOMs and publishing are in
+# docs/adr/0013-distribution.md and 0016; the release workflow runs this.
+version: 2
+project_name: keelbox
+dist: dist/release
+
+builds:
+  - id: keelbox
+    main: ./cmd/keelbox
+    binary: keelbox
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -buildid=
+      - -X github.com/keelbox/keelbox/internal/version.Version={{ .Tag }}
+      - -X github.com/keelbox/keelbox/internal/version.Commit={{ .FullCommit }}
+      - -X github.com/keelbox/keelbox/internal/version.Date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats: [binary]
+    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+
+checksum:
+  name_template: SHA256SUMS
+  # The installer is in the signed SHA256SUMS too, so the script served at
+  # get.keelbox.dev can be checked before it runs (docs/guides/installing.md).
+  extra_files:
+    - glob: ./get/install.sh
+
+sboms:
+  - artifacts: binary
+    documents: ["{{ .ArtifactName }}.spdx.json"]
+
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args: [sign-blob, --yes, "--bundle=${signature}", "${artifact}"]
+    artifacts: checksum
+
+release:
+  # release-please creates the release and its notes; goreleaser adds assets.
+  mode: keep-existing
+  extra_files:
+    - glob: ./get/install.sh
+  prerelease: auto
+
+changelog:
+  disable: true

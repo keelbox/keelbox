@@ -1,0 +1,19 @@
+
+  [38;5;79m✓[0m [1mworkstation is set up[0m                                                    [38;5;109min 2m05s[0m
+
+  Claude Code and Codex are installed and run as the agent, an account without sudo
+  that can install Ubuntu packages (keelbox install). The box is this machine. It
+  is on your tailnet. SSH from the internet closes once [38;5;179mkeelbox apply workstation[0m
+  reaches it over the tailnet from another computer; [38;5;179mkeelbox doctor workstation[0m
+  says whether it has.
+
+[38;5;59m╭─[0m [1;38;5;179mStart working[0m [38;5;59m───────────────────────────────────────────────────────────────────╮[0m
+[38;5;59m│[0m [38;5;109mThis computer[0m   [38;5;179mkeelbox attach workstation[0m                                        [38;5;59m│[0m
+[38;5;59m│[0m                 opens the agent's terminal on this machine. Close it and the work [38;5;59m│[0m
+[38;5;59m│[0m                 carries on; run it again to come back.                            [38;5;59m│[0m
+[38;5;59m│[0m                                                                                   [38;5;59m│[0m
+[38;5;59m│[0m [38;5;109mPhone over SSH[0m  add your phone's key to the box first:                            [38;5;59m│[0m
+[38;5;59m│[0m                 ]8;;https://keelbox.dev/docs/guides/sessions\[38;5;110mhttps://keelbox.dev/docs/guides/sessions[0m]8;;\                          [38;5;59m│[0m
+[38;5;59m╰───────────────────────────────────────────────────────────────────────────────────╯[0m
+
+  [38;5;109mCheck the box[0m   [38;5;179mkeelbox doctor workstation[0m        [38;5;109mall boxes: [0m[38;5;179mkeelbox ls[0m

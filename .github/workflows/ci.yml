@@ -1,0 +1,81 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - run: make check
+
+  install-linux:
+    name: build and install (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      macos: ${{ steps.changes.outputs.macos }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      # Snapshot of every release binary, then the installer smoke test.
+      - run: make test-install
+      # The macOS smoke test runs only when the change can affect the darwin
+      # binary or the installer.
+      - id: changes
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          paths='^(get/|scripts/(test-install|channel-index|homebrew-formula|test-homebrew)\.sh|internal/tools/|\.goreleaser\.yaml|cmd/|internal/(cli|config|release|selfupdate|version)/|go\.(mod|sum)|mise\.toml|\.github/workflows/ci\.yml)'
+          if ! git cat-file -e "${BASE}^{commit}" 2>/dev/null || git diff --name-only "${BASE}" HEAD | grep -Eq "${paths}"; then
+            echo macos=true >>"${GITHUB_OUTPUT}"
+          fi
+      - if: steps.changes.outputs.macos == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: snapshot
+          path: |
+            dist/release/metadata.json
+            dist/release/SHA256SUMS
+            dist/release/SHA256SUMS.sig
+            dist/release/SHA256SUMS.sshsig
+            dist/release/test-keys/keys.pem
+            dist/release/test-keys/keys.ssh
+            dist/release/keelbox_darwin_*/keelbox
+          retention-days: 1
+
+  install-macos:
+    name: install (macos)
+    needs: install-linux
+    if: needs.install-linux.outputs.macos == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: snapshot
+          path: dist/release
+      - run: scripts/test-install.sh dist/release
+      # The tap's formula, from scripts/homebrew-formula.sh, through a local
+      # tap with file:// URLs: brew install, brew test, completion in place.
+      - run: scripts/test-homebrew.sh dist/release

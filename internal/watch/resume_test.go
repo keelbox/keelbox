@@ -1,0 +1,148 @@
+package watch
+
+import (
+	"context"
+	"encoding/json"
+	"reflect"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+)
+
+const sessionID = "1c478115-31e5-4bdf-969c-92af7b92c176"
+
+// writeClaudeSession writes Claude Code's own note on a running process.
+func writeClaudeSession(t *testing.T, b *box, pid int, content string) {
+	t.Helper()
+	if err := b.UserFS("agent").WriteFile("/home/agent/.claude/sessions/"+strconv.Itoa(pid)+".json", []byte(content), 0o600, "agent", "agent"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func bootIs(t *testing.T, b *box, id string) {
+	t.Helper()
+	if err := b.WriteFile("/proc/sys/kernel/random/boot_id", []byte(id+"\n"), 0o444, "root", "root"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readResume(t *testing.T, b *box) (Resume, bool) {
+	t.Helper()
+	data, err := b.ReadFile(ResumePath)
+	if err != nil {
+		return Resume{}, false
+	}
+	var r Resume
+	if err := json.Unmarshal(data, &r); err != nil {
+		t.Fatal(err)
+	}
+	return r, true
+}
+
+// Before a reboot, each pane where Claude Code or Codex runs is noted with
+// the command that opens its conversation again, keeping the flags that say
+// how the agent works. Other programs, and agent CLIs that are not in a
+// conversation, are left out.
+func TestRestartNotesConversations(t *testing.T) {
+	b := rebootBox(t, "")
+	b.OK("systemd-run ", "")
+	bootIs(t, b, "boot-1")
+	b.OK("(as agent) tmux list-panes", "main:1.1\t100\t/home/agent/app\nwork:2.1\t200\t/home/agent/api\nmain:1.2\t300\t/home/agent\nmain:2.1\t400\t/home/agent\nmain:3.1\t500\t/home/agent/old\n")
+	b.OK("ps -u agent", "  100     1 -bash\n  101   100 claude --dangerously-skip-permissions --model opus fix the tests\n"+
+		"  200     1 -bash\n  201   200 codex -m gpt-5 --search --yolo\n  300     1 -bash\n  301   300 vim notes\n"+
+		"  400     1 claude remote-control\n  500     1 -bash\n  501   500 /home/agent/.local/bin/claude\n")
+	writeClaudeSession(t, b, 101, `{"sessionId":"`+sessionID+`","status":"idle"}`)
+	if err := Restart(context.Background(), b.e, "asked", night); err != nil {
+		t.Fatal(err)
+	}
+	r, ok := readResume(t, b)
+	if !ok {
+		t.Fatalf("nothing noted: %v", b.Commands())
+	}
+	want := []ResumePane{
+		{Pane: "main:1.1", Dir: "/home/agent/app", Command: []string{"claude", "--resume", sessionID, "--dangerously-skip-permissions", "--model", "opus"}},
+		{Pane: "work:2.1", Dir: "/home/agent/api", Command: []string{"codex", "resume", "--last", "-m", "gpt-5", "--search"}},
+		// Without Claude Code's note: the directory's latest conversation.
+		{Pane: "main:3.1", Dir: "/home/agent/old", Command: []string{"claude", "--continue"}},
+	}
+	if !reflect.DeepEqual(r.Panes, want) || r.Boot != "boot-1" || !r.Saved.Equal(night) {
+		t.Errorf("noted %+v", r)
+	}
+	if f, _ := b.Stat(ResumePath); f.Mode.Perm() != 0o600 {
+		t.Errorf("mode %v", f.Mode)
+	}
+}
+
+// After the reboot, each pane that is back at a shell gets its command
+// typed, with a cd first when it came back elsewhere. A pane not back yet
+// is tried at the next run.
+func TestResumeAfterTheReboot(t *testing.T) {
+	b := rebootBox(t, "")
+	bootIs(t, b, "boot-1")
+	writeResume(t, b, Resume{Saved: night, Boot: "boot-1", Panes: []ResumePane{
+		{Pane: "main:1.1", Dir: "/home/agent/app", Command: []string{"claude", "--resume", sessionID}},
+		{Pane: "work:2.1", Dir: "/home/agent/my app", Command: []string{"codex", "resume", "--last"}},
+		{Pane: "late:1.1", Dir: "/home/agent", Command: []string{"claude", "--continue"}},
+	}})
+	b.OK("(as agent) tmux list-panes", "main:1.1\tbash\t/home/agent/app\nwork:2.1\tbash\t/home/agent\n")
+	ctx := context.Background()
+
+	resumeConversations(ctx, b.e, night.Add(time.Minute))
+	if b.Ran("(as agent) tmux send-keys") {
+		t.Fatal("typed before the reboot")
+	}
+
+	bootIs(t, b, "boot-2")
+	resumeConversations(ctx, b.e, night.Add(2*time.Minute))
+	typed := sent(b)
+	want := []string{
+		"-t main:1.1 -l -- claude --resume " + sessionID, "-t main:1.1 Enter",
+		"-t work:2.1 -l -- cd -- '/home/agent/my app' && codex resume --last", "-t work:2.1 Enter",
+	}
+	if !reflect.DeepEqual(typed, want) {
+		t.Errorf("typed %q", typed)
+	}
+	if r, _ := readResume(t, b); len(r.Panes) != 1 || r.Panes[0].Pane != "late:1.1" {
+		t.Errorf("left %+v", r.Panes)
+	}
+
+	// A pane that is back but runs something else is not typed into.
+	b.OK("(as agent) tmux list-panes", "late:1.1\tvim\t/home/agent\n")
+	resumeConversations(ctx, b.e, night.Add(4*time.Minute))
+	if len(sent(b)) != len(want) {
+		t.Errorf("typed into a busy pane: %q", sent(b))
+	}
+
+	// It gives up once the panes have had their time.
+	resumeConversations(ctx, b.e, night.Add(resumeFor+time.Minute))
+	if _, ok := readResume(t, b); ok {
+		t.Error("the note outlived its time")
+	}
+}
+
+func writeResume(t *testing.T, b *box, r Resume) {
+	t.Helper()
+	data, _ := json.Marshal(r)
+	if err := b.WriteFile(ResumePath, data, 0o600, "root", "root"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// sent is what was typed into panes, as send-keys's arguments.
+func sent(b *box) []string {
+	var out []string
+	for _, c := range b.Commands() {
+		if rest, ok := strings.CutPrefix(c, "(as agent) tmux send-keys "); ok {
+			out = append(out, rest)
+		}
+	}
+	return out
+}
+
+func TestShellLine(t *testing.T) {
+	got := shellLine([]string{"claude", "--model", "it's", "--add-dir", "/a b", "--x=y"})
+	if want := `claude --model 'it'\''s' --add-dir '/a b' --x=y`; got != want {
+		t.Errorf("got %s", got)
+	}
+}

@@ -1,0 +1,8 @@
+/keelbox
+/dist/
+*.token
+*.authkey
+.env*
+/e2e-logs/
+/.claude/worktrees/
+/.claude/settings.local.json

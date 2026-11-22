@@ -1,0 +1,29 @@
+
+  ✓ devbox-2 is set up                           in 4m48s
+
+  Claude Code and Codex are installed and run as the
+  agent, an account without sudo that can install
+  Ubuntu packages (keelbox install). SSH from the
+  internet is closed; the box is on your tailnet.
+
+╭─ Start working ───────────────────────────────────────╮
+│ This computer                                         │
+│   keelbox attach devbox-2                             │
+│   opens the agent's terminal on the box. Close it and │
+│   the work carries on; run it again to come back.     │
+│                                                       │
+│ Claude app                                            │
+│   Remote Control: the Code tab in the Claude app, or  │
+│   claude.ai/code. Sessions run on devbox-2.           │
+│                                                       │
+│ Phone over SSH                                        │
+│   add your phone's key to the box first:              │
+│   https://keelbox.dev/docs/guides/sessions            │
+╰───────────────────────────────────────────────────────╯
+
+  Check the box
+    keelbox doctor devbox-2
+    all boxes: keelbox ls
+  Admin shell
+    keelbox ssh devbox-2 --admin
+    for anything that needs root; the agent has no sudo

@@ -1,0 +1,32 @@
+✦ keelbox 0.1.0
+
+Step 2 of 7 · Hetzner token ───────────────────────────────
+╭─ About to set up acme ──────────────────────────────────╮
+│ where       a new Hetzner server, cx23 in fsn1,         │
+│             ubuntu-24.04                                │
+│ cost        EUR 3.79 a month or EUR 0.0060 an hour with │
+│             VAT, billed by Hetzner until keelbox        │
+│             destroy acme                                │
+│ agents      claude-code, codex                          │
+│ access      Tailscale; SSH from outside the tailnet,    │
+│             your LAN included, closes once keelbox      │
+│             reaches the box over it                     │
+│             (a value carried on under the row before)   │
+│                                                         │
+│ keelbox hardens the server: no SSH passwords or root    │
+│ login, a firewall, an admin and an agent account, the   │
+│ image's default account locked.                         │
+╰─────────────────────────────────────────────────────────╯
+
+Access ────────────────────────────────────────────────────
+  ✗ The last apply did not finish
+    Fix the cause above.
+    → keelbox up acme
+  - Stopped between two steps, so nothing is half-done
+    → keelbox up acme
+  ! Claude Code Remote Control does not stay running
+    keelbox doctor says why.
+    → keelbox doctor acme
+BOX         STATUS
+acme        ✓ ready
+lab-server  waiting

@@ -1,0 +1,95 @@
+# Releases (docs/maintaining.md): release-please keeps a release PR open on
+# main; merging it tags vX.Y.Z and creates the GitHub release, then goreleaser
+# builds, signs (release key and cosign) and attaches the assets and the
+# channel index here. Promotion
+# to the public download host is scripts/publish.sh.
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and sign again, e.g. v0.1.0
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      created: ${{ steps.rp.outputs.release_created }}
+      tag: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - id: rp
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  build:
+    needs: release-please
+    if: ${{ !cancelled() && (needs.release-please.outputs.created == 'true' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # attach assets to the release
+      id-token: write # keyless cosign signature
+    env:
+      TAG: ${{ needs.release-please.outputs.tag || inputs.tag }}
+    steps:
+      # The signing identity is this workflow on main; installers verify it.
+      - if: github.ref != 'refs/heads/main'
+        run: echo "releases are built from main only" >&2 && exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      # A test build trusts a key from its environment (ADR 0018) and is
+      # never published. Checked before the build, and on the binaries
+      # before they are signed.
+      - name: No test build
+        run: "! grep -n keelbox_testkeys .goreleaser.yaml"
+      - run: mise exec -- goreleaser release --clean
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: No test build in the binaries
+        run: |
+          for b in dist/release/keelbox-*-*; do
+            case "$b" in *.json) continue ;; esac
+            if mise exec -- go version -m "$b" | grep -q keelbox_testkeys; then echo "$b is a test build" >&2; exit 1; fi
+          done
+      # The release key signature every client checks (ADR 0016). The tool
+      # is built first, so the key reaches only the signing command, as an
+      # environment variable it reads; it refuses a key keelbox does not
+      # embed and never prints it.
+      - run: mise exec -- go build -o "${RUNNER_TEMP}/releasesign" ./internal/tools/releasesign
+      - name: Release key signature
+        env:
+          KEELBOX_RELEASE_SIGNING_KEY: ${{ secrets.KEELBOX_RELEASE_SIGNING_KEY }}
+        run: '"${RUNNER_TEMP}/releasesign" sign "${TAG}" dist/release/SHA256SUMS'
+      - name: Upload release key signature
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          "${RUNNER_TEMP}/releasesign" verify "${TAG}" dist/release/SHA256SUMS
+          gh release upload "${TAG}" dist/release/SHA256SUMS.sig dist/release/SHA256SUMS.sshsig --clobber --repo "${GITHUB_REPOSITORY}"
+      - name: Channel index
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          scripts/channel-index.sh "${TAG}" dist/release/SHA256SUMS >dist/release/stable.json
+          gh release upload "${TAG}" dist/release/stable.json --clobber --repo "${GITHUB_REPOSITORY}"

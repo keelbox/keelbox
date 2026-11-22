@@ -1,0 +1,272 @@
+# keelbox box config. One file per box; commit it to your own repo.
+# keelbox up writes one per box to ~/.config/keelbox/boxes/<box>.yaml, and
+# every command takes the box name or this file's path.
+# Preview without changing:   keelbox plan {{.Box}}
+# Converge the box:           keelbox apply {{.Box}}
+# Then sign in and work:      keelbox login {{.Box}}, keelbox attach {{.Box}}
+version: 1
+
+# Box name: lowercase letters, digits and hyphens. Used as the hostname,
+# the cloud server's name and in the agent primer.
+box: {{.Box}}
+
+target:
+  # local:   run keelbox on the box itself.
+  # ssh:     copy keelbox to an existing Ubuntu machine and apply there.
+  # hetzner: create the server through the Hetzner Cloud API (keelbox up or keelbox create).
+  # aws:     create an Amazon Lightsail instance through your AWS CLI (keelbox up or keelbox create).
+  # digitalocean: create a Droplet through your doctl CLI (keelbox up or keelbox create).
+  # gcp:     create a Compute Engine VM through your gcloud CLI (keelbox up or keelbox create).
+  provider: {{.Provider}}
+{{- if eq .Provider "ssh"}}
+  ssh:
+    {{pad 35 (print "host: " (q .SSHHost))}}# {{if .HostPlaceholder}}change to the server's address or DNS name{{else}}the server's address or DNS name{{end}}
+    {{if .SSHUser}}{{pad 35 (print "user: " (q .SSHUser))}}{{else}}{{pad 35 "# user: admin"}}{{end}}# defaults to users.admin.name
+    {{if .IdentityFile}}identity_file: {{q .IdentityFile}}{{else}}# identity_file: ~/.ssh/id_ed25519{{end}}
+    {{if .HostKey}}{{pad 35 (print "host_key: " (q .HostKey))}}{{else}}{{pad 35 "# host_key: \"SHA256:...\""}}{{end}}# pins the host key; read it from the provider console
+    #                                  # (ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub).
+    #                                  # Unset: keelbox shows the fingerprint and asks.
+    # tailnet_host: {{.Box}}.tail1234.ts.net   # optional; unset: the Tailscale IP keelbox reached
+{{- else if eq .Provider "hetzner"}}
+  hetzner:
+    {{pad 35 (print "server_type: " (q .ServerType))}}# keelbox up lists what can be ordered, with prices
+    location: {{q .Location}}
+    image: {{q .Image}}
+    {{pad 35 (print "ssh_keys: [" (join .HetznerKeys) "]")}}# key names in the Hetzner project, for the first connection as root
+    {{if .Credential}}{{pad 35 (print "credential: " (q .Credential))}}{{else}}{{pad 35 "# credential: hetzner"}}{{end}}# the API token's name in your OS credential store
+    {{- if .HcloudContext}}
+    {{pad 35 (print "hcloud_context: " (q .HcloudContext))}}# the API token is read from this hcloud CLI context each time; keelbox keeps no copy
+    {{- end}}
+    {{if .TokenFile}}{{pad 35 (print "token_file: " (q .TokenFile))}}# or a mode 600 file instead; never logged{{else}}# token_file: ~/.config/keelbox/hetzner.token   # or a mode 600 file instead{{end}}
+  {{- if .IdentityFile}}
+  ssh:
+    identity_file: {{q .IdentityFile}}
+  {{- else}}
+  # ssh:
+  #   identity_file: ~/.ssh/id_ed25519
+  {{- end}}
+  #   host: {{.Box}}                 # optional, e.g. the tailnet name once joined
+  #   tailnet_host: {{.Box}}.tail1234.ts.net   # optional; unset: the Tailscale IP keelbox reached
+{{- else if eq .Provider "aws"}}
+  aws:
+    {{pad 35 (print "region: " (q .Region))}}# an AWS region that offers Lightsail
+    {{if .Profile}}{{pad 35 (print "profile: " (q .Profile))}}{{else}}{{pad 35 "# profile: keelbox"}}{{end}}# the AWS CLI profile whose sign-in keelbox uses; unset: the CLI's default
+    {{pad 35 (print "bundle: " (q .Bundle))}}# the Lightsail plan; keelbox up lists them with prices
+    {{pad 35 (print "blueprint: " (q .Blueprint))}}# the Lightsail image
+    # availability_zone: {{.Region}}a   # optional; unset: the region's first zone
+  {{- if .IdentityFile}}
+  ssh:
+    identity_file: {{q .IdentityFile}}
+  {{- else}}
+  # ssh:
+  #   identity_file: ~/.ssh/id_ed25519
+  {{- end}}
+  #   host: {{.Box}}                 # optional, e.g. the tailnet name once joined
+  #   tailnet_host: {{.Box}}.tail1234.ts.net   # optional; unset: the Tailscale IP keelbox reached
+{{- else if eq .Provider "digitalocean"}}
+  digitalocean:
+    {{pad 35 (print "region: " (q .Region))}}# a DigitalOcean region slug
+    {{if .DoctlContext}}{{pad 35 (print "context: " (q .DoctlContext))}}{{else}}{{pad 35 "# context: keelbox"}}{{end}}# the doctl context whose sign-in keelbox uses; unset: doctl's current one
+    {{pad 35 (print "size: " (q .Size))}}# the Droplet size; keelbox up lists them with prices
+    {{pad 35 (print "image: " (q .Image))}}# the image slug
+    # tags: ["team:web"]               # optional extra tags, next to keelbox's own
+  {{- if .IdentityFile}}
+  ssh:
+    identity_file: {{q .IdentityFile}}
+  {{- else}}
+  # ssh:
+  #   identity_file: ~/.ssh/id_ed25519
+  {{- end}}
+  #   host: {{.Box}}                 # optional, e.g. the tailnet name once joined
+  #   tailnet_host: {{.Box}}.tail1234.ts.net   # optional; unset: the Tailscale IP keelbox reached
+{{- else if eq .Provider "gcp"}}
+  gcp:
+    {{if .Project}}{{pad 35 (print "project: " (q .Project))}}{{else}}{{pad 35 "# project: my-project"}}{{end}}# the Google Cloud project id; unset: the project gcloud is configured for
+    {{pad 35 (print "zone: " (q .Zone))}}# a Compute Engine zone
+    {{pad 35 (print "machine_type: " (q .MachineType))}}# the VM's machine type; keelbox up lists some
+    # disk_gb: 50                      # the boot disk in GB
+    # labels: {team: web}              # optional extra labels, next to keelbox's own
+  {{- if .IdentityFile}}
+  ssh:
+    identity_file: {{q .IdentityFile}}
+  {{- else}}
+  # ssh:
+  #   identity_file: ~/.ssh/id_ed25519
+  {{- end}}
+  #   host: {{.Box}}                 # optional, e.g. the tailnet name once joined
+  #   tailnet_host: {{.Box}}.tail1234.ts.net   # optional; unset: the Tailscale IP keelbox reached
+{{- else}}
+  # ssh:
+  #   host: 203.0.113.10
+  #   host_key: "SHA256:..."           # pins the host key; read it from the provider console
+  # hetzner:
+  #   server_type: cpx22               # keelbox up lists what can be ordered, with prices
+  #   location: fsn1
+  #   image: ubuntu-24.04
+  #   ssh_keys: [keelbox-laptop]       # key names in the Hetzner project, for the first connection as root
+  # aws:
+  #   region: eu-central-1             # an AWS region that offers Lightsail
+  #   bundle: medium_3_0               # the Lightsail plan; keelbox up lists them with prices
+  #   profile: keelbox                 # the AWS CLI profile whose sign-in keelbox uses
+  # digitalocean:
+  #   region: fra1                     # a DigitalOcean region slug
+  #   size: s-2vcpu-4gb                # the Droplet size; keelbox up lists them with prices
+  #   context: keelbox                 # the doctl context whose sign-in keelbox uses
+  # gcp:
+  #   zone: europe-west3-a             # a Compute Engine zone
+  #   machine_type: e2-medium          # the VM's machine type; keelbox up lists some
+  #   project: my-project              # the Google Cloud project id; unset: gcloud's own
+{{- end}}
+
+host:
+{{- if .Hostname}}
+  {{pad 35 (print "hostname: " (q .Hostname))}}# the machine's own name, kept; default: the box name
+{{- end}}
+  timezone: {{q .Timezone}}
+  locale: {{q .Locale}}
+  swap: 2G                             # 0 leaves swap alone; existing swap is never replaced
+  # packages: [postgresql-client]      # extra apt packages
+  unattended_upgrades: true            # security updates, installed automatically
+  # When the box restarts for an update that needs it: nightly between 01:00
+  # and 06:00 once idle, weekly the same on Sunday night, never (you run
+  # keelbox reboot {{.Box}}), or a time like "04:00", idle or not. Claude Code
+  # and Codex conversations in tmux open again afterwards.
+  auto_reboot: {{q .AutoReboot}}
+  firewall:
+    enabled: true                      # UFW: deny inbound except SSH, tailscale0 and allow, Docker ports included
+    {{pad 35 (print "public_ssh: " .PublicSSH)}}# auto: SSH from outside the tailnet, the LAN included, closes once
+                                       #   keelbox reaches sshd over the tailnet; lan: as auto, but the LAN keeps SSH;
+                                       # open: never closed; closed: as auto, and kept closed
+{{- if .Allow}}
+    allow:                             # kept open to the LAN; the tailnet reaches every port
+    {{- range .Allow}}
+      - {{allow .}}
+    {{- end}}
+{{- else}}
+    # allow:                           # ports kept open to the LAN; the tailnet reaches every port
+    #   - {name: plex, port: 32400}    # proto: tcp (default) or udp; from: lan (default) or a CIDR
+    #   - {port: 8000-8010}            # a range
+    #   - {service: unifi}             # a known service's ports: https://keelbox.dev/docs/reference/services
+{{- end}}
+    # link_local_accounts: [do-agent]  # accounts besides root that keep link-local addresses, cloud metadata
+                                       #   among them: each can relay there for the agent if the agent can drive it
+
+users:
+  # Cloud images ship a default account (ubuntu) with your key and sudo
+  # without a password. keelbox locks it once the admin account works.
+{{- if .KeepCloudUser}}
+  # Off: keelbox up runs on this machine from that account, yours.
+  lock_cloud_user: false
+{{- else}}
+  lock_cloud_user: true
+{{- end}}
+  # Admin: you. Key-only SSH, sudo without a password (the account has none).
+  admin:
+    name: admin
+{{- template "keys" .}}
+  # Agent: runs the agents, its own rootless Docker and your projects.
+  # Never in the docker group. permissions is what it may change on the box:
+  #   auto    installs Ubuntu packages itself with keelbox install, which a
+  #           root service checks; no sudo (the default)
+  #   manual  asks first; you approve with keelbox approve {{.Box}}
+  #   full    sudo: it can change anything, and none of keelbox's limits on
+  #           the agent then hold
+  agent:
+    name: agent
+{{- template "keys" .}}
+{{- if .ExplicitPermissions}}
+    permissions: {{.Permissions}}
+{{- else}}
+    # permissions: auto
+{{- end}}
+{{- if .AgentLimit}}
+    limits:                            # other services run here: the agent leaves them the rest
+      {{pad 33 (print "cpu: " .AgentLimit "%")}}# of all CPUs
+      {{pad 33 (print "memory: " .AgentLimit "%")}}# slows down at 90% of it; the kernel stops its largest process at it
+{{- else if .AgentUnlimited}}
+    limits: {memory: none}             # no ceiling: the agent can use all the memory
+{{- else}}
+    # limits: {memory: 90%}            # the default ceiling: the kernel stops the agent's largest
+    #                                  # process at it. memory: none lifts it;
+    #                                  # {cpu: 75%, memory: 75%} suits a shared machine
+{{- end}}
+{{- if .GitName}}
+    git:                               # the name and email the agent's commits carry
+      name: {{q .GitName}}
+      email: {{q .GitEmail}}
+{{- else}}
+    # git: {name: Your Name, email: you@example.com}  # the agent's commits carry these; without them git refuses to commit
+{{- end}}
+
+runtime:
+  docker: true                         # Docker Engine from Docker's apt repo; rootless for the agent
+  node: true                           # Node LTS and pnpm via mise, for the agent user
+  {{pad 37 (print "gh: " (not .NoGH))}}# GitHub CLI; sign the agent in with its own scoped account or token
+
+# Each vendor's own installer puts its CLI in the agent's home, where it
+# updates as on any computer (claude update, codex update). You sign in
+# yourself after apply; keelbox never sees or stores agent credentials.
+agents: [{{join .Agents}}]
+
+sessions:
+  tmux: true
+  recovery: true                       # tmux-resurrect + continuum
+  start_on_boot: true                  # tmux server starts at boot and restores sessions
+  welcome: true                        # a new session starts with a few lines: where you are, how to leave
+  remote_control:
+    {{pad 35 (print "enabled: " .RemoteControl)}}# true: Claude Code Remote Control as a service, after keelbox login
+    # directory: projects              # in the agent's home; sessions start here
+    # spawn: same-dir                  # or worktree
+
+access:
+  tailscale:
+    {{pad 35 (print "enabled: " (not .NoTailscale))}}# private access to the box; keelbox login joins your tailnet
+    # auth_key_file: ~/.config/keelbox/tailscale.authkey   # optional, mode 600; else: keelbox login {{.Box}} tailscale
+    # hostname: {{.Box}}
+
+primer:
+  enabled: true                        # writes AGENTS.md for every agent on the box
+  # notes: |
+  #   Project-specific rules for agents on this box.
+
+# Previews: `keelbox expose PORT`, run by the agent on the box, publishes
+# 127.0.0.1:PORT at https://<box>.<tailnet>.ts.net:<port>/ on the tailnet
+# only. Needs Tailscale, with HTTPS certificates on in its admin console.
+previews:
+  {{pad 37 (print "enabled: " (not .NoTailscale))}}# default: on when tailscale is enabled
+  ports: 8401-8499                     # HTTPS ports previews get, on tailnet addresses only
+
+# Backups with restic to S3-compatible storage (B2, R2, S3, MinIO). Off
+# until repository is set. Secrets by path only, mode 600; keep a copy of
+# the password off the box, or the backups cannot be read.
+# backup:
+#   repository: s3:https://s3.eu-central-003.backblazeb2.com/my-bucket/{{.Box}}
+#   credentials_file: ~/.config/keelbox/backup-s3.credentials   # [default] aws_access_key_id / aws_secret_access_key
+#   password_file: ~/.config/keelbox/backup.password
+#   schedule: daily                    # systemd OnCalendar, e.g. "*-*-* 03:00"
+#   keep: {daily: 7, weekly: 4, monthly: 6}
+#   # paths: [/home/agent]             # default: the agent's home
+#   # exclude: [node_modules, .cache]  # replaces the default exclusions
+#   stale_after: 48h                   # doctor fails when the last good backup is older
+
+# Notifications: when an agent is done, needs you or hits a limit, and when
+# a scheduled doctor check starts failing. Off until a channel is set.
+# Secrets by path only, mode 600. https://keelbox.dev/docs/guides/notifications
+# notify:
+#   channels:
+#     - {name: phone, type: ntfy, topic_file: ~/.config/keelbox/ntfy.topic}
+#   mute: [agent-done]
+#   quiet_hours: "22:00-07:00"         # the box's timezone; urgent still goes through
+{{- define "keys"}}
+    {{- if .Keys}}
+    ssh_authorized_keys:
+      {{- range .Keys}}
+      - {{q .}}
+      {{- end}}
+    {{- else}}
+    ssh_authorized_key_files:
+      {{- range $i, $f := .KeyFiles}}
+      - {{if eq $i 0}}{{pad 31 (q $f)}}# read where keelbox runs{{else}}{{q $f}}{{end}}
+      {{- end}}
+    {{- end}}
+{{- end}}

@@ -1,0 +1,29 @@
+version: "2"
+linters:
+  default: standard
+  enable:
+    - staticcheck
+    - misspell
+    - gosec
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*os.File).Close
+        - os.Remove
+        - os.RemoveAll
+    misspell:
+      locale: UK
+    gosec:
+      excludes:
+        - G204 # commands are built from typed config, never a shell string from input
+        - G304 # reading config and key files the user names is the point
+        - G301
+        - G306
+        - G104 # covered by errcheck and its exclusions
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [gosec, errcheck, misspell]

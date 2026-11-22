@@ -1,0 +1,58 @@
+# keelbox release manifest: the tested versions `keelbox apply` installs.
+# Bump release whenever a pin changes, and record why in the commit.
+#
+# Pinning policy (docs/adr/0004-release-manifest.md):
+#   exact     mise, node, pnpm, tmux plugins: apply converges to these.
+#   series    docker: apply installs the newest package in this major series.
+#   exact     caddy, restic: release binaries checked against these checksums.
+manifest: 1
+channel: stable
+release: "2026.11.4"
+
+os:
+  ubuntu: ["24.04", "26.04"]
+  arch: [amd64, arm64]
+
+docker:
+  series: "29"
+  # Primary key fingerprint of https://download.docker.com/linux/ubuntu/gpg
+  gpg_fingerprint: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+
+tailscale:
+  # Primary key fingerprint of https://pkgs.tailscale.com/stable/ubuntu/<codename>.noarmor.gpg
+  gpg_fingerprint: 2596A99EAAB33821893C0A79458CA832957F5868
+
+github_cli:
+  # Primary key fingerprint of https://cli.github.com/packages/githubcli-archive-keyring.gpg
+  gpg_fingerprint: 2C6106201985B60E6C7AC87323F3D4EA75716059
+
+mise:
+  version: 2026.11.2
+  sha256:
+    amd64: c914dc3be1ad3588c3a7fa8ddae86c65e77eaf1777aa4a900c215e467f4c94a4
+    arm64: 4d69f304a1501441cf455f6c7f96b117a10c27a568cdda3b5d1fa8e67476b038
+
+node: 24.22.2
+pnpm: 12.17.0
+
+tmux:
+  resurrect: cff343cf9e81983d3da0c8562b01616f12e8d548
+  continuum: 0698e8f4b17d6454c71bf5212895ec055c578da0
+
+# Previews (docs/adr/0019-previews.md). Checksums from
+# caddy_<version>_checksums.txt, whose Sigstore signature was verified for
+# the identity https://github.com/caddyserver/caddy/.github/workflows/release.yml@refs/tags/v<version>.
+caddy:
+  version: 2.11.9
+  sha512:
+    amd64: 0e85544340290a16ce4bfb76fe7d65e9de1bf3a6e67f5ccfff30b30d27ea4c73e078077b7bf3e58ae60b6b12e44327705287059c775bca5782e8ee85ea7edd75
+    arm64: 9e5e76d7888542924de2c25353ae87c5f77e2a22c5b1198633cae13688922282e05383d142599205c88d8d80eee5e967d291214d7abce4835329a191b20dd6e0
+
+# Backups (docs/adr/0020-backups.md). Checksums from the release's
+# SHA256SUMS, whose GPG signature was verified against restic's release key
+# CF8F18F2844575973F79D4E191A6868BD3F7A907 (Alexander Neumann).
+restic:
+  version: 0.19.1
+  sha256:
+    amd64: f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c
+    arm64: a5f64aaab53d51e311fa3829124c5b703f2d14cf187d8640b6be3b2b49376465

@@ -1,0 +1,36 @@
+# 0073: Remote Control's first run ends by itself
+
+Date: 2026-11-15. Status: accepted. Builds on ADR 0014 (sign-in from the laptop) and ADR 0023 (Remote Control). Supersedes the "Keep Ctrl-C" point of ADR 0061; the rest of ADR 0061 stands.
+
+## Context
+The first time `claude remote-control` runs for an account it asks two questions on the terminal: "Trust <dir>?" and "Enable Remote Control?". keelbox cannot answer them for the user, so `keelbox login` runs the server once on the user's terminal, with the terminal's file descriptors handed to ssh and nothing read (ADR 0014), and then starts the agent's service (ADR 0023, ADR 0061).
+
+Left alone, that run has to be ended by the user. Claude Code's screen ends on "Connected", a link and "Press Ctrl+C to stop", which reads as a warning not to. keelbox can say beforehand to press Ctrl-C at "Connected", but once Claude Code has the terminal keelbox can say nothing more, and the last line on the screen says the opposite. Nothing happens until the key is pressed.
+
+ADR 0061 kept Ctrl-C because keelbox could not see "Connected" without reading the vendor's output, and because the state Claude Code keeps on disk could not be checked without an account. A check on Claude Code 2.1.311 with a signed-in account, on 2026-11-15, found that the agent's `~/.claude.json` records the two answers, and only a yes:
+
+- `remoteDialogSeen` at the top level becomes `true` within about a second of a `y` to "Enable Remote Control?". After an `n` it stays absent and the process exits.
+- `projects["<absolute path of the directory>"]["hasTrustDialogAccepted"]` becomes `true` within about a second of a `y` to the trust question. Before that it is `false`, or the entry is absent.
+- Neither is written when a question is only shown.
+- With both true the server prints "Connected" about five seconds later, and a service started afterwards stays up.
+
+Neither key is documented by the vendor.
+
+Options: keep Ctrl-C and reword again (the vendor's last line still wins); read the terminal run's output for "Connected" (against ADR 0014, and it would pass an account's link through keelbox); pre-write the two keys so that nothing is asked (keelbox would be answering a trust question for the user); or look at the two keys, by exit code, to learn when the user has answered.
+
+## Decision
+- **A check of two flags, by exit code.** As the agent, over an ssh connection of its own, keelbox runs one `python3` command on the box. It looks up `remoteDialogSeen` and `hasTrustDialogAccepted` for `sessions.remote_control.directory` (resolved on the box, in the agent's home, as written and with links resolved), prints nothing, and exits 0 when both are `true`, 1 when not (or when there is no file) and 2 when the file cannot be read or parsed. Its output is discarded on the box. keelbox uses no other key of that file, passes none of it on, and does not touch `~/.claude/.credentials.json`. Any other exit (no `python3`, ssh's own failure) means "cannot tell".
+- **keelbox ends the terminal run once both answers are in.** While the server has the terminal, keelbox runs the check every two seconds. When it first reports both, keelbox waits six seconds, long enough for "Connected" to show, then sends SIGINT, as the agent, to the agent's own `claude remote-control` process: `pkill -INT -u "$(id -u)" -f '^([^ ]*/)?claude remote-control '`. That is what Ctrl-C on the terminal sends. The service is stopped for the terminal run, so the copy on the terminal is the one that matches; the pattern starts at the start of the command line, so the shell that runs it does not. Should the watchdog have started the service in that time, that copy gets the signal too, the one a stop of the unit sends, and keelbox restarts the unit next in any case. The ssh that holds the terminal is not touched: it ends when the server does and restores the terminal itself. keelbox then prints "Both answers are in: starting Claude Code Remote Control as a service" and carries on as ADR 0061 describes.
+- **No terminal run when there is nothing to ask.** With both flags already true, keelbox goes straight to starting the service. If the service then does not run, the message says the answers are recorded and where Claude Code's own errors are, instead of asking for the answers again.
+- **Ctrl-C stays as the fallback, and is still said.** Before the run keelbox says: answer y to both; a few seconds after both answers keelbox ends this copy by itself; if it does not, press Ctrl-C when it says Connected. If the check cannot tell before the run, keelbox promises nothing and only says to press Ctrl-C ("press Ctrl-C: keelbox is waiting for that"). If it stops being able to tell part way, keelbox stops looking and sends nothing. A Ctrl-C from the user, or a no (the process exits), ends the run; the watch ends with it, and no check or signal is under way when the service is started.
+- **Nothing is answered for the user.** keelbox writes nothing to `~/.claude.json` and types nothing into the run. The flags only tell it when the user's own answers are in.
+
+## Consequences
+- The user answers two questions and waits. Between the second answer and the terminal coming back lie the two-second interval, the six-second wait and two ssh connections: six to ten seconds.
+- While the server has the terminal, keelbox opens one ssh connection as the agent every two seconds. Each ends with its command; when the terminal run ends, the one under way is stopped and waited for.
+- keelbox reads something Claude Code keeps on the box: two booleans, through an exit code. ADR 0014's rule for what passes over the terminal is unchanged, and so is ADR 0023's that keelbox never reads Claude Code's credential files and never answers its questions. `docs/security-model.md` and the guide say so.
+- The two keys are undocumented and may change with a Claude Code version. If they are renamed or moved, the check answers "not yet" for ever: nothing ends by itself, the line before the run has already said to press Ctrl-C at "Connected", and the flow is the one ADR 0061 describes. If the file's format changes so that it does not parse, the check cannot tell and keelbox only says to press Ctrl-C. Neither case fails anything. Checking the keys against a new Claude Code version needs a real account (ADR 0023), so it is not in the end-to-end test.
+- The six seconds come from one version. If a later one takes longer to connect, keelbox interrupts the copy before "Connected" shows. The answers are recorded by then; if the service started next does not stay up, keelbox says so and offers to try again, as for any other failed start.
+- The file belongs to the agent. The check reports what the file says, not who wrote it; a yes there decides only whether keelbox shows the terminal run and when it ends it.
+- The box needs `python3` for the check. Ubuntu's server and cloud images have it, and keelbox's base package `python3-pil` depends on it; without it the check cannot tell, and the user presses Ctrl-C.
+- Covered by unit tests: the real command against sample files (each exit code, no output), and the flow against a stand-in ssh (both answers already in; answers given during the run, one interrupt after the wait; a check that cannot tell; a run the user ends).

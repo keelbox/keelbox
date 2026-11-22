@@ -1,0 +1,21 @@
+# 0035: keelbox up on a first run: kept answers, the key, the hostname, sign-ins as a choice
+
+Date: 2026-11-07. Status: accepted. Extends ADR 0025.
+
+## Context
+Without this decision, a first run of `keelbox up` on the most common path would have several ways to stop short of Ready. A key `up` had just made would not be on an existing server, so the check that follows would fail. A failure before the config is written would discard every answer. A host that does not answer could look like a key problem. On an existing server a default box name such as `devbox` would silently become the hostname. Ready would need Tailscale, Claude, OpenAI and GitHub accounts, with nothing saying what GitHub is for, and leaving would take one Ctrl-C per vendor, ending in raw `exit status 130` and `context canceled` lines. On this machine, `status` and `doctor` would fail for the user who ran `up`, on the root-only `/etc/keelbox/keelbox.yaml`.
+
+## Decision
+- **Answers are kept until the config exists.** Each answer is stored, as the flag it stands for, in `~/.config/keelbox/up-draft.json` (mode 600, no secrets; a Hetzner token goes to the credential store). A failed check or Ctrl-C at a question says the answers are kept; the next `keelbox up` offers to carry on with them, and `keelbox up <box>` uses them for that box. The draft is deleted once the box's config is written, or when the user says no at the summary.
+- **Reachability before keys.** The check dials port 22 first. A host that does not answer, or does not resolve, is reported as such, with the address to check; a key problem is reported only for `Permission denied`.
+- **The key goes onto the server inside `up`.** When the server refuses the key for that account, `up` offers: `ssh-copy-id` (when installed), which logs in with a password or another key that works now; a one-line command to paste into the provider's console, printed with the key in it; or stop. Then it checks again. A failed `ssh-copy-id` falls back to the console line. Without a terminal, `up` stops with exit 3 and both ways, before any change. keelbox never sees the password: `ssh-copy-id` runs on the user's terminal with keelbox's pinned `known_hosts` and `StrictHostKeyChecking=yes`.
+- **A machine keeps its name.** On an existing server and on this machine, the box name defaults to the hostname the read-only check found, and the question is asked after the check. Another name asks whether to rename the machine too, default no; the config then carries `host.hostname`. The summary says which.
+- **Each sign-in is a choice.** Before each vendor, `up` and `keelbox login` say what the account is for and offer: sign in now, skip for now (with the command for later), or check again. A vendor's flow runs behind `trap 'exit 130' INT`, so one Ctrl-C ends the whole step, whatever the vendor CLI exits with, and says the command that continues. Skipped or unfinished sign-ins are recorded in `<box>.up.json`; `up` reaches Ready, which lists them under "Left to do", and `ls` shows them; `keelbox login` takes them off. `--skip-sign-in` does the same without a terminal. `keelbox login <box> <sign-in>` runs one. The wizard asks whether to install the GitHub CLI (`runtime.gh`).
+- **Box-local commands run themselves with sudo.** A command that needs root, run as another user on a `local` box, runs again under `sudo` with the same arguments and says sudo may ask for a password. When `/etc/keelbox/keelbox.yaml` is unreadable and the registry holds one `local` box, that box is used.
+- **`keelbox forget <box>`** unregisters a box: its config, `up` records and pinned host keys. It does not touch the machine; it is what `destroy` points to on a machine the user has.
+- Whether the LAN keeps SSH once it closes: ADR 0036.
+
+## Consequences
+- The draft file is one more file in `~/.config/keelbox`; it holds only answers a user typed or chose, the same that end up in the config.
+- `up` can reach Ready with Tailscale skipped: public SSH then stays open, and Ready says so and how to close it.
+- A sudo re-exec runs keelbox's own binary as root: the same trust the user already gives `sudo "$(command -v keelbox)"`. Without a terminal it uses `sudo -n` and fails rather than prompting.
