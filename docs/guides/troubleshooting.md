@@ -13,7 +13,7 @@ None of these changes the box. `keelbox status --all` asks every box at once. Af
 ```text
 sign-in
   ✓  tailscale                signed in
-  !  gh                       not signed in: keelbox login devbox gh
+  !  gh                       not signed in: keelbox login acme gh
 ```
 
 `✓` passed, `!` is a warning, `✗` a failure (`ok`, `warn`, `FAIL` without a terminal). A line that did not pass says why, and most end with the command that clears it. `drift, apply would change:` means a setting no longer matches the config: run `keelbox apply acme`. Doctor also runs on the box hourly by default, and `keelbox status` shows that result.

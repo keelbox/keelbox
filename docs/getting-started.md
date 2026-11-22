@@ -27,7 +27,7 @@ The installer checks the release signature and puts keelbox in `~/.local/bin`, w
 keelbox up
 ```
 
-It asks its questions in seven steps; Enter takes the highlighted answer. Ctrl-C stops at any question, and `keelbox up` continues later with your answers. Nothing is created before your yes at step 5.
+It asks its questions in seven steps; Enter takes the highlighted answer. Ctrl-C stops at any question, and `keelbox up` continues later with your answers. No server is created and nothing changes on the box before your yes at step 5.
 
 ### Step 1: Where the box runs
 
