@@ -63,9 +63,10 @@ step "fresh install"
 HOME="${home}" /bin/sh get/install.sh --test | tee "${work}/out"
 [[ -x "${home}/.local/bin/keelbox" ]] || fail "not installed to ~/.local/bin"
 grep -q "is not on your PATH" "${work}/out" || fail "no PATH hint"
-grep -q "release key signature verified" "${work}/out" || fail "release key signature not reported"
+grep -q "Release key signature verified" "${work}/out" || fail "release key signature not reported"
 if grep -qi "cosign\|sigstore" "${work}/out"; then fail "an install without cosign mentions it"; fi
-grep -q "checksum verified against SHA256SUMS and" "${work}/out" || fail "index cross-check not reported"
+grep -q "Checksum matches SHA256SUMS and" "${work}/out" || fail "index cross-check not reported"
+if grep -q "once a day" "${work}/out"; then fail "the update-check notice printed during the install"; fi
 
 # refused DIR WANT [ENV...]: the installer must fail with WANT and install nothing.
 refused() {
@@ -77,7 +78,7 @@ refused() {
   echo "refused: $(cat "${work}/err")"
 }
 
-grep -q "Remove: rm ${home}/.local/bin/keelbox" "${work}/out" || fail "no uninstall line"
+grep -q "Remove: rm ~/.local/bin/keelbox" "${work}/out" || fail "no uninstall line"
 [[ -s "${home}/.local/share/bash-completion/completions/keelbox" ]] || fail "no bash completion"
 grep -q "complete -F _keelbox keelbox" "${home}/.local/share/bash-completion/completions/keelbox" || fail "bash completion is not keelbox's"
 # The installer itself is in the signed SHA256SUMS.
@@ -99,18 +100,18 @@ rmdir "${home}/.claude"
 step "the PATH line for the user's shell"
 HOME="${home}" SHELL=/bin/zsh /bin/sh get/install.sh --test | tee "${work}/out"
 grep -qF 'export PATH="$HOME/.local/bin:$PATH"' "${work}/out" || fail "no zsh PATH line"
-grep -qF "Add this line to ${home}/.zshrc" "${work}/out" || fail "not ~/.zshrc for zsh"
+grep -qF "Add this line to ~/.zshrc" "${work}/out" || fail "not ~/.zshrc for zsh"
 HOME="${home}" SHELL=/usr/bin/fish /bin/sh get/install.sh --test | tee "${work}/out"
 grep -qF 'fish_add_path $HOME/.local/bin' "${work}/out" || fail "no fish PATH line"
 printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >>"${home}/.zshrc"
 HOME="${home}" SHELL=/bin/zsh /bin/sh get/install.sh --test | tee "${work}/out"
-grep -q "puts ${home}/.local/bin on PATH; open a new terminal" "${work}/out" || fail "line already in ~/.zshrc not seen"
+grep -qF "zshrc puts ~/.local/bin on PATH. Open a new terminal" "${work}/out" || fail "line already in ~/.zshrc not seen"
 if script --version >/dev/null 2>&1; then
   # On a terminal it offers to add the line, and does.
   rm -f "${home}/.bashrc"
   printf 'y\n' | HOME="${home}" SHELL=/bin/bash script -qec "/bin/sh get/install.sh --test" /dev/null >"${work}/out"
     grep -qF 'export PATH="$HOME/.local/bin:$PATH"' "${home}/.bashrc" || fail "line not added to ~/.bashrc: $(cat "${work}/out")"
-  grep -q "added to ${home}/.bashrc" "${work}/out" || fail "adding not reported"
+  grep -q "Added to ~/.bashrc" "${work}/out" || fail "adding not reported"
 fi
 
 step "--prefix: binary in PREFIX/bin, completion under PREFIX/share"
@@ -123,7 +124,7 @@ grep -q "give one" "${work}/err" || fail "unexpected error: $(cat "${work}/err")
 
 step "up: keelbox up runs once installed, with the flags after it"
 HOME="${home}" /bin/sh get/install.sh --test up --help | tee "${work}/out"
-grep -q "starting keelbox up" "${work}/out" || fail "up not started"
+grep -q "Starting keelbox up" "${work}/out" || fail "up not started"
 grep -q "keelbox up \[box\]: set up a box" "${work}/out" || fail "up --help not passed through"
 
 step "pinned version, custom dir"
@@ -175,7 +176,7 @@ mkdir -p "${work}/libressl"
 printf '#!/bin/sh\necho "LibreSSL 3.3.6"\n' >"${work}/libressl/openssl"
 chmod +x "${work}/libressl/openssl"
 PATH="${work}/libressl:${PATH}" /bin/sh get/install.sh --test --dir "${work}/ssh" | tee "${work}/out"
-grep -q "release key signature verified (ssh-keygen)" "${work}/out" || fail "ssh-keygen fallback not used"
+grep -q "Release key signature verified (ssh-keygen)" "${work}/out" || fail "ssh-keygen fallback not used"
 
 step "no tool to check the signature: refused"
 mkdir -p "${work}/minimal"

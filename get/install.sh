@@ -63,8 +63,41 @@ release_keys_ssh='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINz4QTjDO5ApRe46EVbxBWTVZk
 
 usage='usage: install.sh [--version vX.Y.Z] [--prefix DIR | --dir DIR] [--no-modify-path] [up [flags]]'
 
-say() { printf 'keelbox: %s\n' "$*"; }
-die() { printf 'keelbox: %s\n' "$*" >&2; exit 1; }
+# Output: a tick per check passed, ! for what needs a look, and the
+# commands to type in brass (yellow). Colour only on a terminal, and never
+# with NO_COLOR; ASCII marks where the locale is not UTF-8.
+c_b='' c_d='' c_ok='' c_warn='' c_x=''
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ]; then
+  esc=$(printf '\033')
+  c_b="${esc}[1m" c_d="${esc}[2m" c_ok="${esc}[32m" c_warn="${esc}[33m" c_x="${esc}[0m"
+fi
+c_err='' c_errx=''
+if [ -t 2 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ]; then
+  c_err=$(printf '\033[31m') c_errx=$(printf '\033[0m')
+fi
+case ${LC_ALL:-${LC_CTYPE:-${LANG:-}}} in
+  *[Uu][Tt][Ff]-8* | *[Uu][Tt][Ff]8*) m_ok='✓' m_err='✗' ;;
+  *) m_ok='ok' m_err='!!' ;;
+esac
+
+say() { printf '  %s\n' "$*"; }
+ok() { printf '  %s%s%s %s\n' "$c_ok" "$m_ok" "$c_x" "$*"; }
+warn() { printf '  %s!%s %s\n' "$c_warn" "$c_x" "$*"; }
+cmd() { printf '    %s%s%s\n' "$c_warn" "$*" "$c_x"; }
+detail() { printf '    %s%s%s\n' "$c_d" "$*" "$c_x"; }
+die() { printf '%s%s keelbox installer:%s %s\n' "$c_err" "$m_err" "$c_errx" "$*" >&2; exit 1; }
+
+# The installer runs keelbox itself (version, completion, the skill) with
+# the update check off: its notice waits for the user's first command.
+kb() { KEELBOX_NO_UPDATE_CHECK=1 "$target" "$@"; }
+
+# tilde shows a path under $HOME as ~/..., for reading.
+tilde() {
+  case $1 in
+    "$HOME"/*) printf '~%s' "${1#"$HOME"}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
 
 fetch() { # url dest
   # HTTPS URLs may only redirect to HTTPS. Plain HTTP is for a test server
@@ -138,7 +171,7 @@ verify_signature() {
     printf '%s\n' "$keys_pem" | awk -v d="$tmp" '/BEGIN PUBLIC KEY/ { n++ } n { print > (d "/release-key-" n ".pem") }'
     for key in "$tmp"/release-key-*.pem; do
       if openssl pkeyutl -verify -pubin -inkey "$key" -rawin -in "$tmp/signed" -sigfile "$tmp/SHA256SUMS.sig" >/dev/null 2>&1; then
-        say "release key signature verified (openssl)"
+        ok "Release key signature verified (openssl)"
         return 0
       fi
     done
@@ -149,7 +182,7 @@ verify_signature() {
     printf '%s\n' "$keys_ssh" | sed 's/^/keelbox-release namespaces="keelbox-release" /' >"$tmp/allowed_signers"
     if ssh-keygen -Y verify -f "$tmp/allowed_signers" -I keelbox-release -n keelbox-release \
       -s "$tmp/SHA256SUMS.sshsig" <"$tmp/signed" >/dev/null 2>&1; then
-      say "release key signature verified (ssh-keygen)"
+      ok "Release key signature verified (ssh-keygen)"
       return 0
     fi
     die "SHA256SUMS for $version is not signed by a keelbox release key (checked with ssh-keygen, which needs OpenSSH 8.1 or later); refusing to install"
@@ -209,7 +242,7 @@ main() {
 
   echo
   if [ "$run_up" = yes ]; then
-    say "starting keelbox up"
+    say "Starting keelbox up"
     # Piped from curl, stdin is this script: keelbox up asks on the terminal.
     # exec replaces this shell, so its EXIT trap would not run.
     rm -rf "$tmp"
@@ -219,10 +252,14 @@ main() {
     fi
     exec "$target" up "$@"
   fi
-  printf 'Next:\n  keelbox up    # set up a box: a server you reach over SSH, this machine, or a new one\n'
-  remove="rm $target$completion_files"
+  say "${c_b}Next, set up a box${c_x} on a server you reach over SSH, this machine, or a new one:"
+  cmd "keelbox up"
+  echo
+  remove="rm $(tilde "$target")"
+  for f in $completion_files; do remove="$remove $(tilde "$f")"; done
   [ "$skill_added" = yes ] && remove="keelbox agent-skill remove; $remove"
-  printf 'Update: keelbox self-update. Remove: %s\n' "$remove"
+  printf '  %sUpdate: keelbox self-update%s\n' "$c_d" "$c_x"
+  printf '  %sRemove: %s%s\n' "$c_d" "$remove" "$c_x"
 }
 
 # install_binary downloads, checks and installs keelbox as $target, unless
@@ -240,21 +277,21 @@ install_binary() {
       *) die "KEELBOX_INDEX_URL must be an https:// URL" ;;
     esac
   else
-    say "warning: --test: honouring KEELBOX_RELEASE_URL, KEELBOX_TEST_RELEASE_KEYS and HTTP URLs"
+    warn "--test: honouring KEELBOX_RELEASE_URL, KEELBOX_TEST_RELEASE_KEYS and HTTP URLs"
   fi
 
   keys_pem=$release_keys_pem keys_ssh=$release_keys_ssh
   if [ -n "${KEELBOX_TEST_RELEASE_KEYS:-}" ]; then
     keys_pem=$(cat "$KEELBOX_TEST_RELEASE_KEYS/keys.pem")
     keys_ssh=$(cat "$KEELBOX_TEST_RELEASE_KEYS/keys.ssh")
-    say "warning: trusting test release keys from $KEELBOX_TEST_RELEASE_KEYS, not keelbox's"
+    warn "trusting test release keys from $KEELBOX_TEST_RELEASE_KEYS, not keelbox's"
   fi
 
   fetch "$index_url" "$tmp/index.json"
   field() { sed -n "s/^ *\"$1\": *\"\([^\"]*\)\".*/\1/p" "$tmp/index.json" | head -n 1; }
   if [ -n "${KEELBOX_RELEASE_URL:-}" ]; then
     releases=${KEELBOX_RELEASE_URL%/}
-    say "downloading from $releases (KEELBOX_RELEASE_URL)"
+    warn "downloading from $releases (KEELBOX_RELEASE_URL)"
   else
     releases=$(field releases)
     releases=${releases%/}
@@ -277,12 +314,20 @@ install_binary() {
     die "invalid version $version"
 
   plat=$(platform)
-  if [ -x "$target" ] && "$target" version 2>/dev/null | grep -q "^keelbox $version "; then
-    say "keelbox $version is already installed at $target"
+  echo
+  if [ -x "$target" ] && kb version 2>/dev/null | grep -q "^keelbox $version "; then
+    ok "keelbox $version is already installed at $(tilde "$target")"
     return 0
   fi
 
-  say "downloading keelbox $version for $plat"
+  case $plat in
+    darwin-arm64) where='macOS on Apple silicon' ;;
+    darwin-amd64) where='macOS on Intel' ;;
+    linux-arm64) where='Linux on Arm' ;;
+    *) where='Linux on x86-64' ;;
+  esac
+  say "Installing ${c_b}keelbox $version${c_x} for $where"
+  echo
   base=$releases/$version
   fetch "$base/SHA256SUMS" "$tmp/SHA256SUMS"
   verify_signature "$tmp/SHA256SUMS"
@@ -292,14 +337,14 @@ install_binary() {
     :
   elif ! cosign version >/dev/null 2>&1; then
     # A version manager's shim with no version selected, for one.
-    say "warning: cosign is on PATH but does not run: the Sigstore signature was not checked (the release key signature was)"
+    warn "cosign is on PATH but does not run: the Sigstore signature was not checked (the release key signature was)"
   else
     fetch "$base/SHA256SUMS.sigstore.json" "$tmp/SHA256SUMS.sigstore.json"
     cosign verify-blob --bundle "$tmp/SHA256SUMS.sigstore.json" \
       --certificate-identity "$signer" --certificate-oidc-issuer "$issuer" \
       "$tmp/SHA256SUMS" >/dev/null 2>&1 ||
       die "SHA256SUMS for $version is not signed by keelbox's release workflow (cosign)"
-    say "Sigstore signature verified (cosign)"
+    ok "Sigstore signature verified (cosign)"
   fi
   want=$(awk -v f="keelbox-$plat" '$2 == f { print $1 }' "$tmp/SHA256SUMS")
   [ -n "$want" ] || die "release $version has no keelbox-$plat binary"
@@ -310,20 +355,21 @@ install_binary() {
   fetch "$base/keelbox-$plat" "$tmp/keelbox"
   got=$(sha256 "$tmp/keelbox")
   [ "$got" = "$want" ] || die "checksum mismatch for keelbox-$plat: got $got, want $want"
-  say "checksum verified against SHA256SUMS and $index_url"
+  ok "Checksum matches SHA256SUMS and $(printf '%s' "$index_url" | sed 's|^[a-z]*://||')"
 
   chmod 0755 "$tmp/keelbox"
   mkdir -p "$dir"
   # Copy beside the target, then rename: a running keelbox is never half-written.
   cp "$tmp/keelbox" "$dir/.keelbox.new"
   mv -f "$dir/.keelbox.new" "$target"
-  say "installed $("$target" version) to $target"
+  kb version >/dev/null || die "the installed $target does not run"
+  ok "Installed to $(tilde "$target")"
 }
 
 # install_completion writes completion for each shell found here, from the
 # binary itself, so it always matches its commands and flags.
 install_completion() {
-  completion_files='' zsh_hint=''
+  completion_files='' zsh_hint='' shells=''
   if [ -n "$prefix" ]; then
     share=$prefix/share
     bash_dir=$share/bash-completion/completions
@@ -343,19 +389,22 @@ install_completion() {
       zsh) f=$zsh_dir/_keelbox ;;
       fish) f=$fish_dir/keelbox.fish ;;
     esac
-    if mkdir -p "$(dirname "$f")" 2>/dev/null && "$target" completion "$sh" >"$f.new" 2>/dev/null && mv -f "$f.new" "$f"; then
+    if mkdir -p "$(dirname "$f")" 2>/dev/null && kb completion "$sh" >"$f.new" 2>/dev/null && mv -f "$f.new" "$f"; then
       completion_files="$completion_files $f"
+      shells="${shells:+$shells, }$sh"
     else
       rm -f "$f.new" 2>/dev/null || true
-      say "warning: could not write $sh completion to $f (keelbox completion $sh prints it)"
+      warn "could not write $sh completion to $(tilde "$f") (keelbox completion $sh prints it)"
     fi
   done
-  [ -z "$completion_files" ] || say "shell completion:$completion_files"
+  # "bash, zsh, fish" reads "bash, zsh and fish".
+  [ -z "$completion_files" ] || ok "Shell completion for $(printf '%s' "$shells" | sed 's/\(.*\), /\1 and /')"
   case $completion_files in
     *_keelbox*)
       if [ -n "$zsh_hint" ] && [ "$(basename "${SHELL:-}")" = zsh ]; then
+        detail "For zsh, add this line to ~/.zshrc, before compinit:"
         # shellcheck disable=SC2016 # for the user's ~/.zshrc
-        printf 'For zsh completion, add before compinit in ~/.zshrc:\n  fpath=(%s $fpath)\n' "$(home_path "$zsh_dir")"
+        cmd "fpath=($(home_path "$zsh_dir") \$fpath)"
       fi
       ;;
   esac
@@ -390,13 +439,14 @@ check_path() {
   esac
   echo
   if [ -f "$rc" ] && grep -qF "$line" "$rc"; then
-    say "$rc puts $dir on PATH; open a new terminal, or run: $line"
+    warn "$(tilde "$rc") puts $(tilde "$dir") on PATH. Open a new terminal, or run:"
+    cmd "$line"
     return 0
   fi
-  say "$dir is not on your PATH. Add this line to $rc:"
-  printf '  %s\n' "$line"
+  warn "$(tilde "$dir") is not on your PATH. Add this line to $(tilde "$rc"):"
+  cmd "$line"
   [ "$modify_path" = ask ] && (: </dev/tty) 2>/dev/null || return 0
-  printf 'Add it now? [Y/n] ' >/dev/tty
+  printf '  Add it now? [Y/n] ' >/dev/tty
   read -r answer </dev/tty || answer=n
   case $answer in
     '' | [Yy] | [Yy][Ee][Ss]) ;;
@@ -404,26 +454,38 @@ check_path() {
   esac
   mkdir -p "$(dirname "$rc")"
   printf '\n# keelbox (https://get.keelbox.dev)\n%s\n' "$line" >>"$rc"
-  say "added to $rc; open a new terminal, or run: $line"
+  ok "Added to $(tilde "$rc"). Open a new terminal, or run:"
+  cmd "$line"
 }
 
 # offer_agent_skill asks to add keelbox's skill for Claude Code and Codex
 # on this computer, where either is set up; without a terminal, or with
 # --no-modify-path, it names the command instead.
 offer_agent_skill() {
-  [ -d "$HOME/.claude" ] || [ -d "$HOME/.codex" ] || return 0
+  agents=''
+  [ -d "$HOME/.claude" ] && agents='Claude Code'
+  [ -d "$HOME/.codex" ] && agents="${agents:+$agents and }Codex"
+  [ -n "$agents" ] || return 0
   echo
   if [ "$modify_path" = ask ] && (: </dev/tty) 2>/dev/null; then
-    printf "Add keelbox's skill, so Claude Code and Codex on this computer can use keelbox? [Y/n] " >/dev/tty
+    printf "  Add keelbox's skill so %s on this computer can use keelbox? [Y/n] " "$agents" >/dev/tty
     read -r answer </dev/tty || answer=n
     case $answer in
       '' | [Yy] | [Yy][Ee][Ss])
-        if "$target" agent-skill install; then skill_added=yes; else say "later: keelbox agent-skill install"; fi ;;
-      *) say "later: keelbox agent-skill install" ;;
+        if kb agent-skill install >/dev/null; then
+          skill_added=yes
+          ok "Skill added. $agents will ask before keelbox commands that change a box, and never run approve or deny."
+          detail "New sessions pick it up."
+        else
+          say "To add it later: keelbox agent-skill install"
+        fi
+        ;;
+      *) say "To add it later: keelbox agent-skill install" ;;
     esac
     return 0
   fi
-  say "For Claude Code and Codex on this computer to use keelbox: keelbox agent-skill install"
+  say "For $agents on this computer to use keelbox, run:"
+  cmd "keelbox agent-skill install"
 }
 
 main "$@"
