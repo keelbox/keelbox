@@ -8,17 +8,13 @@ host:
       - {service: jellyfin, from: 192.168.1.0/24}
 ```
 
-`host.firewall.allow` takes a service by name and opens the ports its section below lists, TCP and UDP together.
+A `service` entry in [`host.firewall.allow`](config.md#allow) opens every port its section below lists, TCP and UDP. `from` defaults to `lan`, and `name` renames the rules, which are commented `keelbox allow unifi`. Published ports of system Docker containers get the same exceptions.
 
-Each entry becomes one UFW rule per port or range and source network, commented `keelbox allow unifi`. It also adds the matching exceptions to the guard for system Docker containers' published ports. `from` works as for a port entry and defaults to `lan`. `name` renames the rules.
+- An entry names a service or a port, not both. For a port a section does not list, add a port entry: `{name: jellyfin-dlna, port: 1900, proto: udp}`.
+- No preset opens SSH or a port its vendor marks as local-only. Ports are as each vendor's page listed them on 2026-11-07.
+- On [a machine already in use](../guides/machine-in-use.md), `keelbox up` and `keelbox plan --impact` recognise these services by process name, systemd unit or container image. For each one the firewall would cut off, `up` asks once and `plan --impact` prints the entry that keeps it.
 
-An entry names a service or a port, not both. A port the service uses that its section does not list is an entry of its own: `{name: jellyfin-dlna, port: 1900, proto: udp}`. No preset opens SSH or a port its vendor marks as local-only. The ports were read from each vendor's page on 2026-11-07.
-
-`keelbox up` and `keelbox plan --impact` recognise these services on [a machine already in use](../guides/machine-in-use.md). They match the listening process's name, its systemd unit, or the image of the Docker container it runs in. For each one the firewall would cut off, `up` asks once and `plan --impact` prints the entry that keeps it.
-
-Ports marked "discovery" are how devices and apps find a service on the LAN without its address. They arrive as broadcasts or multicasts, which UFW passes to its rules, so the entry admits them from the LAN like any other port.
-
-Docker does not forward broadcasts to a container on a bridge network. Discovery reaches a container only on the host network, `network_mode: host`. Without discovery, enter the address by hand in the app or device. For UniFi that is `set-inform http://ADDRESS:8080/inform` on the device.
+Ports marked "discovery" carry the broadcasts or multicasts devices and apps use to find a service on the LAN. The entry admits them from the LAN like any other port. Docker does not forward broadcasts to a container on a bridge network, so discovery reaches a container only with `network_mode: host`. Without discovery, enter the address in the app or device by hand; for UniFi, `set-inform http://ADDRESS:8080/inform` on the device.
 
 ## adguard
 
@@ -168,6 +164,6 @@ Not opened:
 - 5514/udp, remote syslog.
 - 10101/udp, client fingerprinting.
 - 5671/tcp, UXG traffic flow logs.
-- 8444/tcp, the secure hotspot portal.
+- 8444/tcp, the hotspot portal UniFi calls secure.
 - 28082/tcp, packet capture.
 - 20100-22100/udp, Site Magic.

@@ -1,25 +1,25 @@
 # Your first box
 
-```sh
-curl -fsSL https://get.keelbox.dev | sh
-keelbox up
-```
-
-The first line installs keelbox. The second asks its questions in seven steps, creates a server and sets it up as a box: an Ubuntu machine for AI coding agents. This page follows those steps for a new Hetzner server.
+This page takes you from nothing to an AI coding agent at work on a new Hetzner cloud server. You install keelbox, answer the questions of `keelbox up`, sign in, and attach.
 
 ## Before you start
 
 - A computer running macOS or Linux.
-- A Hetzner Cloud account. For AWS, DigitalOcean or Google Cloud, install that cloud's CLI and sign in first: [cloud sign-ins](guides/credentials.md).
-- A Claude account for Claude Code and a ChatGPT account for Codex, or [API billing](guides/signing-in.md#with-an-api-key) for either. Either agent can be left out.
-- A GitHub account, if the agent is to push.
-- A Tailscale account, with Tailscale running on this computer. Optional; the wizard preselects it.
+- A [Hetzner Cloud](https://console.hetzner.com) account. For AWS, DigitalOcean or Google Cloud, sign in to that cloud's CLI first: [cloud sign-ins](guides/credentials.md).
+- A Claude account for Claude Code, a ChatGPT account for Codex, or an [API key](guides/signing-in.md#with-an-api-key) for either.
+- A GitHub account, if the agent is to push code.
+- Optionally, [Tailscale](https://tailscale.com) running on this computer.
 
-A cloud server is billed from the moment it exists. [Where a box can run](guides/where-to-run.md) sets the four clouds beside a server or a machine you already have.
+The server is billed from the moment it exists until you delete it. To use a machine you already have instead, see [where a box can run](guides/where-to-run.md).
 
 ## Install
 
-The installer puts one binary in `~/.local/bin`, without sudo. If that directory is not on your `PATH`, it offers to add it; open a new terminal afterwards. Other ways: [install keelbox](guides/installing.md).
+```sh
+curl -fsSL https://get.keelbox.dev | sh
+keelbox version
+```
+
+The installer checks the release signature and puts keelbox in `~/.local/bin`, without sudo. If that is not on your `PATH`, it offers to add it: say yes and open a new terminal. Other ways: [install keelbox](guides/installing.md).
 
 ## Run keelbox up
 
@@ -27,7 +27,7 @@ The installer puts one binary in `~/.local/bin`, without sudo. If that directory
 keelbox up
 ```
 
-Ctrl-C stops at any question. No server is created before the yes at step 5.
+It asks its questions in seven steps; Enter takes the highlighted answer. Ctrl-C stops at any question, and `keelbox up` continues later with your answers. No server is created and nothing changes on the box before your yes at step 5.
 
 ### Step 1: Where the box runs
 
@@ -44,22 +44,17 @@ Ctrl-C stops at any question. No server is created before the yes at step 5.
   ↑↓ move · 1-4 pick · Enter choose
 ```
 
-The highlight starts on option 1, or 2 on a headless Ubuntu. Choose 3, then Hetzner, then name the box; this page uses `acme`. The name is also the server's hostname.
-
-- Options 1 and 4: [a server you already have](guides/adopting-a-box.md).
-- Option 2: [a machine already in use](guides/machine-in-use.md).
+Choose 3, then Hetzner. Name the box: Enter takes `devbox`; this page uses `acme`.
 
 ### Step 2: Hetzner token
 
-A card gives three steps: create a project in the Hetzner Console, generate an API token with Read & Write, and paste it. It is not shown as you paste.
-
-The token reaches every server in its project and nothing outside it. keelbox keeps it in your OS credential store, or a mode 600 file where there is none; `keelbox forget-token` removes it.
+Follow the three steps keelbox shows: create a project in the Hetzner Console, generate an API token with Read & Write, and paste it (it is not shown). The token reaches every server in its project, so use a project for boxes only. keelbox keeps it in your OS credential store; `keelbox forget-token` removes it.
 
 ### Step 3: Server
 
-Choose a location, then a size. The wizard preselects `fsn1` and the cheapest size with 2 vCPU and 4 GB, enough for one or two agents. Each size shows Hetzner's price, with VAT.
+Press Enter for the preselected location, `fsn1`, and size: the cheapest with 2 vCPU and 4 GB, enough for one or two agents.
 
-keelbox logs in to the box with an SSH key. If `~/.ssh` has none, it offers to make one with `ssh-keygen`, which asks for a passphrase.
+If `~/.ssh` has no SSH key, keelbox offers to create one, and `ssh-keygen` asks for a passphrase.
 
 ### Step 4: Agents and access
 
@@ -67,75 +62,68 @@ keelbox logs in to the box with an SSH key. If `~/.ssh` has none, it offers to m
 |---|---|
 | Which agents? | Claude Code and Codex |
 | Install the GitHub CLI? | Yes |
-| Commit as your name and email? | Yes, when git on this computer has them. Otherwise type them, or press Enter to skip. |
-| How much may the agent change this box? | Auto: the agent installs Ubuntu packages and has no sudo. |
+| Commit as your name and email? | Yes, from git on this computer |
+| How much may the agent change this box? | Auto: it installs Ubuntu packages, with no sudo. Full gives it sudo, and keelbox's limits on it no longer hold. |
 | Use Tailscale to reach the box? | Yes |
-| Restart for updates? | Nightly, once idle |
+| When should the box restart for an update? | Nightly, once idle |
 
-Tailscale is a private network between your devices, called your tailnet. With it, SSH from the internet closes at the end of setup, once keelbox has reached the box over the tailnet. For that, this computer must be on the same tailnet; if it is not, SSH stays open.
+Tailscale is a private network between your devices, your tailnet. With it, SSH from the internet closes at the end of setup, provided this computer is on the same tailnet. Otherwise SSH stays open, with keys only.
 
-The box's Tailscale key expires after 180 days, unless you turn key expiry off for it in the Tailscale admin console. A box with an expired key and SSH closed is recovered from the cloud account: [getting back in](guides/public-ssh.md#getting-back-in).
-
-Without Tailscale the box is reached over public SSH, with keys only.
+The box's Tailscale key expires after 180 days unless you turn key expiry off for it in the Tailscale admin console. If it expires, you [get back in](guides/public-ssh.md#getting-back-in) through Hetzner.
 
 ### Step 5: Review
 
-A card lists the server, an estimate of its price, the agents and the access. Under it: `Create the server (about EUR ... a month until you destroy it)?`
-
-Yes is preselected, so Enter creates the server and Hetzner bills it by the hour from then. `n` stops with no server created.
+keelbox lists the server, its price with VAT, the agents and the access, then asks `Create the server (about EUR ... a month until you destroy it)?`. Enter says yes, and Hetzner bills by the hour from then. `n` stops with nothing created.
 
 ### Step 6: Set up
 
-keelbox uploads your SSH public key to the Hetzner project, creates the server and a firewall in front of it, and sets the box up.
+keelbox creates the server with a cloud firewall in front of it and sets the box up. Setup runs on the server, so it carries on if this computer sleeps.
 
 ### Step 7: Sign in
 
-For each sign-in the wizard offers "Sign in now", "Skip for now" and "I have signed in".
+keelbox runs each vendor's own sign-in on your terminal and never sees the credentials. For each, choose "Sign in now" or "Skip for now".
 
 | Sign-in | What you do |
 |---|---|
-| Tailscale | Open the link and approve the machine in the browser. |
+| Tailscale | Open the link and approve the machine. |
 | Claude Code | Open the link, sign in, and paste the code it gives you into the terminal. |
 | Codex | Open the link and type the code Codex shows into the browser. |
-| GitHub | Open the link gh shows and type its code in the browser. gh finishes once you approve. |
+| GitHub | Paste a fine-grained token for the repositories you choose (keelbox says how to make one), or sign in in the browser. |
 
 A skipped sign-in is listed at the end with its command, such as `keelbox login acme codex`.
 
-After the Claude Code sign-in the wizard asks whether to turn on Remote Control, with No preselected. A yes lets anyone signed in to your Claude account start sessions on the box from [the Claude app](guides/remote-control.md).
+After Claude Code, keelbox asks whether to turn on Remote Control, with No preselected. Yes lets anyone signed in to your Claude account start sessions on the box from [the Claude app](guides/remote-control.md).
 
 keelbox then applies once more, over the tailnet, and closes SSH from the internet.
 
-## The box is set up
+## Start working
 
-The last screen says what is installed, whether SSH from the internet is closed, and what is left.
-
-```text
-╭─ Start working ─────────────────────────────────────────────────────────╮
-│ This computer   keelbox attach acme                                     │
-│                 opens the agent's terminal on the box. Close it and the │
-│                 work carries on; run it again to come back.             │
-│                                                                         │
-│ Claude app      Remote Control: the Code tab in the Claude app, or      │
-│                 claude.ai/code. Sessions run on acme.                   │
-│                                                                         │
-│ Phone over SSH  add your phone's key to the box first:                  │
-│                 https://keelbox.dev/docs/guides/sessions                │
-╰─────────────────────────────────────────────────────────────────────────╯
-```
+The last screen says what is installed, what is left to do, and how to reach the box. Open the agent's terminal:
 
 ```sh
 keelbox attach acme
 ```
 
-Type `claude` or `codex` to start an agent. `Ctrl-b` then `d` leaves: the session and everything in it keeps running on the box, and `keelbox attach acme` returns to it.
+Type `claude` or `codex` to start an agent. To leave, press `Ctrl-b`, let go, then press `d`: the agent keeps working on the box. `keelbox attach acme` takes you back.
 
 ## If it stops
 
-Run `keelbox up acme`. It continues where it stopped, with your answers. Setup on a server carries on while this computer is closed.
+`keelbox up acme` continues where it stopped. `keelbox doctor acme` checks the box and says what to fix: [troubleshooting](guides/troubleshooting.md).
+
+## Stop paying for it
+
+A powered-off server is still billed. A parked box's snapshot is billed per GB stored.
+
+```sh
+keelbox park acme       # delete the server, keep its disk as a snapshot
+keelbox resume acme     # bring a parked box back on a new server
+keelbox destroy acme    # delete the server and its disk
+```
+
+More: [resize, park and resume](guides/resize-park-resume.md), [remove a box](guides/removing-a-box.md).
 
 ## Next
 
-- Work [from a phone](guides/sessions.md#from-a-phone).
-- `keelbox doctor acme` [checks the box](guides/troubleshooting.md).
-- `keelbox park acme` deletes the server and [keeps its disk](guides/resize-park-resume.md).
-- `keelbox destroy acme` [deletes the server and its disk](guides/removing-a-box.md).
+- [Attach, leave and come back](guides/sessions.md), also from a phone.
+- [Work on the box](guides/work-on-the-box.md): git, packages and what the agent may change.
+- [Security model](security-model.md): read it before you give the agent credentials.

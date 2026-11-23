@@ -4,109 +4,56 @@
 keelbox up
 ```
 
-Two answers to its first question set up a server that keelbox does not create. Option 1, "An existing server (SSH)", is a server you already log in to. Option 4, "A server I create myself (cloud-config)", is a new server at any provider, started from a snippet keelbox prints.
+Two answers to the first question set up a server that keelbox does not create:
 
-Either becomes a box: an Ubuntu machine for AI coding agents, with an `admin` account for you and an `agent` account for the agents.
+- **1, An existing server (SSH)**: a server you already log in to.
+- **4, A server I create myself (cloud-config)**: a new server at any provider, started from a snippet keelbox prints.
 
-## Before you start
-
-- The server runs Ubuntu 24.04 or 26.04, on amd64 or arm64, and has internet access.
-- For option 1, you log in to it over SSH as `root`, or as an account with sudo.
+The server must run Ubuntu 24.04 or 26.04 on amd64 or arm64, with internet access. Agents and access, and Sign in, work as for [your first box](../getting-started.md).
 
 ## A server you reach over SSH
 
-The steps are: Where the box runs, Server, Agents and access, What runs there, Review, Set up, Sign in. Agents and access and Sign in are the same as for [your first box](../getting-started.md).
+At step 2, give the address you `ssh` to now and the account you log in as: `root`, or one with sudo such as `ubuntu`. The host key fingerprint is optional (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the server shows it). Without it, keelbox shows the keys at the first connection and asks `Trust and pin these host keys?`, with No preselected. It refuses the server later if the key changes.
 
-### Step 2: Server
+keelbox then connects once, changes nothing, and checks the Ubuntu release and sudo. If the server does not take your SSH key, it offers `ssh-copy-id` or a line to paste in the provider's console. If sudo needs a password, sudo asks on your terminal at step 4 and again at Set up; keelbox never reads it.
 
-| Question | Answer |
-|---|---|
-| Server's IP address or DNS name | The address you `ssh` to now. |
-| Which account do you log in to the server as now? | `root`, `ubuntu`, or another account with sudo. |
-| Host key fingerprint | Optional. The provider's console shows it, and so does `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the server. |
+The box name defaults to the hostname. A different name asks whether to rename the machine too, with No preselected.
 
-Without a fingerprint, keelbox shows the server's host keys at the first connection and asks `Trust and pin these host keys?`, with No preselected. It keeps the keys in `~/.config/keelbox/known_hosts` and refuses a server whose key differs later.
+At step 4 keelbox reads the server as root, still changing nothing. If it already runs other software, you get more questions: see [a machine already in use](machine-in-use.md).
 
-keelbox then connects once and changes nothing. It checks the Ubuntu release and that the account can use sudo.
+The Review lists what changes on the server:
 
-| The check finds | What happens |
-|---|---|
-| The server does not take your SSH key | A menu offers to copy the key with `ssh-copy-id`, or prints one line to paste in the provider's console. |
-| The server refuses `root` and names the image's account | keelbox checks again as that account. |
-| sudo asks for a password | sudo asks on your terminal twice: at step 4 and at the start of Set up. keelbox does not read the password. |
-
-The last question is the box name. Enter keeps the server's hostname. With another name, keelbox asks whether to rename the machine as well, with No preselected. The server keeps its timezone and locale.
-
-### Step 4: What runs there
-
-keelbox looks at the server again, as root, and changes nothing.
-
-With Tailscale, a server at a private address gets the question `Keep SSH open to your LAN as well?`, with Yes preselected. [Closing public SSH](public-ssh.md) says what each answer leaves open.
-
-A server that runs other software gets more questions here, and a longer Review. It says that accounts other than root lose link-local addresses and the server's own SSH port: [a machine already in use](machine-in-use.md).
-
-### Step 5: Review
-
-The first card lists your answers. The second, "On ADDRESS, keelbox changes", lists what happens to the server:
-
-- SSH takes keys only: password and root logins stop.
-- The UFW firewall turns on, and lets in SSH and Tailscale only.
-- The accounts `admin` and `agent` are created. Docker, Node, Tailscale and the agent CLIs are installed.
+- SSH takes keys only, so password and root logins stop.
+- The UFW firewall turns on and admits SSH and Tailscale only.
+- The accounts `admin` and `agent` are created, and Docker, Node, Tailscale and the agent CLIs are installed.
 - The image's default account is locked once `admin` logs in with your key.
 
-Under them: `Go ahead?`, with Yes preselected. `n` stops before keelbox changes the server, and `keelbox up` continues later with your answers.
-
-### Step 6: Set up
-
-keelbox applies the config: it changes the server until the two match. It applies as the account you named, then again as `admin`. The second run shows that `admin` logs in with your key and can use sudo.
-
-keelbox asks nothing in either run. From then on it connects as `admin`.
+`n` at `Go ahead?` stops before any change, and `keelbox up` continues later. Set up applies as the account you named, then again as `admin`, to confirm `admin` logs in with your key and has sudo. From then on keelbox connects as `admin`.
 
 ## A server you create yourself
 
-The steps are: Where the box runs, Cloud-config, Agents and access, Review, Create the server, Set up, Sign in.
+Step 2 asks `Include the host key?` (Yes preselected), so keelbox recognises the server at the first connection. Without it, you compare fingerprints then.
 
-Step 2 asks one question, `Include the host key?`, with Yes preselected. With it, keelbox recognises the server at the first connection by a host key in the snippet. Without it, you compare fingerprints at that connection.
+A yes at Review creates nothing. keelbox prints a cloud-config, saves it in `~/.config/keelbox/boxes/acme.cloud-config`, and tells you to create an Ubuntu 24.04 or newer server with it in the provider's "Cloud config" or "User data" field, and no SSH key. The cloud-config creates `admin` with your key and turns off SSH passwords and root login.
 
-At Review, a yes to `Go ahead?` creates nothing. It prints a card and, under it, the cloud-config:
-
-```text
-╭─ Create the server for acme ────────────────────────────────────────────────────────╮
-│ 1.        Create an Ubuntu 24.04 (or newer) server with your provider.              │
-│ 2.        Paste the cloud-config below into its "Cloud config" or "User data" field │
-│           (Hetzner: Cloud config; DigitalOcean, Vultr, AWS: User data).             │
-│ 3.        Add no SSH key there: the cloud-config installs yours.                    │
-│                                                                                     │
-│ saved in  ~/.config/keelbox/boxes/acme.cloud-config, until keelbox has replaced its │
-│           host key                                                                  │
-│ copy it   cat ~/.config/keelbox/boxes/acme.cloud-config                             │
-╰─────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-Create the server, then type its address at `The server's IP address, once it is running`. Ctrl-C at that question keeps the box. `keelbox ls` then shows `waiting for the server`, and `keelbox up acme` asks for the address again.
-
-The cloud-config creates the `admin` account with your SSH public key, and turns off SSH passwords and root login. Its host key is used once. At the first connection keelbox replaces it with keys made on the server, then deletes the saved file.
-
-Set up and Sign in then run as for any other box.
+Then type the address at `The server's IP address, once it is running`. Ctrl-C there keeps the box as `waiting for the server`; `keelbox up acme` asks again. At the first connection keelbox replaces the snippet's host key with keys made on the server and deletes the saved file.
 
 ## The image's default account
 
-Most cloud images come with a default account, usually `ubuntu`, that has your SSH key and sudo without a password. keelbox locks that account once `admin` has logged in with your key. SSH and sudo then refuse it; its home directory and files stay. The reason is in the [security model](../security-model.md).
+Most cloud images have a default account, usually `ubuntu`, with your SSH key and sudo without a password. keelbox locks it once `admin` has logged in with your key: SSH and sudo refuse it, and its files stay. Only accounts cloud-init gave passwordless sudo are locked, never `admin`, `agent`, `root` or one you made. The [security model](../security-model.md) says why.
 
-The accounts locked are the ones cloud-init gave sudo without a password, other than `admin`, `agent` and `root`. An account you made yourself is not locked.
-
-To keep the account, set this key in `~/.config/keelbox/boxes/acme.yaml` and run `keelbox apply acme`:
+To keep the account, set this in `~/.config/keelbox/boxes/acme.yaml` and run `keelbox apply acme`:
 
 ```yaml
 users:
   lock_cloud_user: false
 ```
 
-The key stops the next lock. To undo a lock that has happened:
+To undo a lock, set the key above, then:
 
 ```sh
 keelbox ssh acme --admin
 sudo usermod --unlock ubuntu && sudo chage -E -1 ubuntu
 ```
 
-Without the key in the config, the next apply locks the account again.
+Without the key, the next apply locks it again. `usermod` warns that the account has no password; that is expected, as it logs in with keys.
