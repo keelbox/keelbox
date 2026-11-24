@@ -1,4 +1,4 @@
-# 0093: Terminfo for Ghostty, cmux and kitty: kitty's package, and a compiled copy for Ghostty
+# 0094: Terminfo for Ghostty, cmux and kitty: kitty's package, and a compiled copy for Ghostty
 
 Date: 2026-11-24. Status: accepted.
 

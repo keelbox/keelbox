@@ -956,7 +956,7 @@ func sessionCutOff(ctx context.Context, failure, err error, s *provider.SSH, box
 // and the welcome in a new session's first pane (modules.SessionWelcome).
 // ssh hands the box the laptop's TERM. When the box has no terminfo entry
 // for it (a TERM the box lacks, such as xterm-ghostty on a box apply has
-// not yet given the entry, ADR 0093), tmux stops with "missing or
+// not yet given the entry, ADR 0094), tmux stops with "missing or
 // unsuitable terminal", so the session gets xterm-256color, which those
 // terminals also speak. infocmp is in ncurses-bin, which every
 // Ubuntu has.

@@ -378,7 +378,7 @@ func paneOOMCheck(t *testing.T, host string) {
 // terminfoChecks log in as the agent with the TERM names Ghostty (and
 // cmux) and kitty send over ssh: tmux starts in a terminal script(1)
 // provides and tput moves the cursor, while a name with no entry still
-// fails as tmux does. Every account reads the entries (ADR 0093).
+// fails as tmux does. Every account reads the entries (ADR 0094).
 func terminfoChecks(t *testing.T, host string) {
 	t.Helper()
 	must(t, host, "agent", "stat -c '%n %a %U' /etc/terminfo/x /etc/terminfo/x/xterm-ghostty /usr/share/terminfo/x/xterm-kitty",

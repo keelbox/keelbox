@@ -12,7 +12,7 @@ import (
 
 // TerminfoDir is where keelbox compiles its terminfo aliases: the
 // system-local directory, which ncurses searches before the packages'
-// (ncurses-base owns only its README). ADR 0093.
+// (ncurses-base owns only its README). ADR 0094.
 const TerminfoDir = "/etc/terminfo"
 
 // terminfoPackageDirs hold the entries packages install.
