@@ -171,7 +171,7 @@ func (c *updateCheck) finish(stderr io.Writer) {
 	have := checkVersion()
 	update := "keelbox self-update"
 	if exe, err := checkExecutable(); err == nil {
-		if cmd := packageManager(exe); cmd != "" {
+		if _, cmd := packageManager(exe); cmd != "" {
 			update = cmd
 		}
 	}

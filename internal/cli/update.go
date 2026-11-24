@@ -78,8 +78,8 @@ func cmdUpdate(ctx context.Context, cfg *config.Config, o options, path string, 
 	if real, rerr := filepath.EvalSymlinks(exe); rerr == nil {
 		exe = real
 	}
-	if cmd := packageManager(exe); cmd != "" {
-		failf(stderr, "keelbox %s is out and this keelbox, %s, belongs to Homebrew, which updates it; %s was not touched. Update it, then run this again: %s\n", latest, have, cfg.Box, cmd)
+	if by, cmd := packageManager(exe); cmd != "" {
+		failf(stderr, "keelbox %s is out and this keelbox, %s, belongs to %s, which updates it; %s was not touched. Update it, then run this again: %s\n", latest, have, by, cfg.Box, cmd)
 		return 1
 	}
 	to, err := replaceSelf(ctx, exe, o.allowDowngrade)

@@ -30,8 +30,8 @@ func cmdSelfUpdate(ctx context.Context, o options, stdout, stderr io.Writer) int
 		fail(stderr, err)
 		return 1
 	}
-	if cmd := packageManager(exe); cmd != "" {
-		failf(stderr, "%s belongs to Homebrew, which updates it: %s\n", exe, cmd)
+	if by, cmd := packageManager(exe); cmd != "" {
+		failf(stderr, "%s belongs to %s, which updates it: %s\n", exe, by, cmd)
 		return 1
 	}
 	to, err := selfupdate.Update(ctx, f, exe, version.Version, release.Platform(runtime.GOOS, runtime.GOARCH), o.allowDowngrade)
@@ -73,14 +73,30 @@ func boxCopyNote(exe, box string) string {
 	return fmt.Sprintf("This machine is a box too: its own keelbox, %s, is replaced by the next apply: keelbox apply", box)
 }
 
-// packageManager returns the command that updates keelbox when a package
-// manager installed it, so self-update does not swap the file under it.
-func packageManager(exe string) string {
+// packageManager says who installed keelbox and the command that updates
+// it, when a package manager did, so self-update does not swap the file
+// under it. Homebrew keeps it in its Cellar. A distribution package puts it
+// in /usr/bin, where neither keelbox's installer (~/.local/bin) nor a box's
+// apply (/usr/local/bin) does; on Arch that is an AUR package, which an AUR
+// helper updates.
+func packageManager(exe string) (by, cmd string) {
 	if real, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = real
 	}
-	if strings.Contains(filepath.ToSlash(exe), "/Cellar/keelbox/") {
-		return "brew upgrade keelbox"
+	switch dir := filepath.Dir(filepath.ToSlash(exe)); {
+	case strings.Contains(filepath.ToSlash(exe), "/Cellar/keelbox/"):
+		return "Homebrew", "brew upgrade keelbox"
+	case dir == "/usr/bin" || dir == "/bin" || dir == "/usr/sbin" || dir == "/sbin":
+		if onArch() {
+			return "an Arch package", "yay -Syu (or your AUR helper's update)"
+		}
+		return "your system's package manager", "your package manager's upgrade"
 	}
-	return ""
+	return "", ""
+}
+
+// onArch: pacman is the package manager. Tests replace it.
+var onArch = func() bool {
+	_, err := os.Stat("/usr/bin/pacman")
+	return err == nil
 }

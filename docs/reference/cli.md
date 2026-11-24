@@ -591,7 +591,7 @@ Flags:
 ```
 <!-- keelbox update --help: end -->
 
-The new keelbox runs the apply, so the box gets the release just installed. update stops before touching the box if it cannot read the release or replace the binary, or the binary is Homebrew's.
+The new keelbox runs the apply, so the box gets the release just installed. update stops before touching the box if it cannot read the release or replace the binary, or a package manager installed the binary.
 
 ### add
 
@@ -1088,7 +1088,7 @@ Flags:
 <!-- keelbox self-update --help: end -->
 
 - It ends by listing the boxes this computer has not applied the new release to. `keelbox apply acme` moves a box; `keelbox update acme` does both steps.
-- A development build refuses. So does a Homebrew install, which names `brew upgrade keelbox`.
+- A development build refuses. So does a copy a package manager installed: Homebrew's names `brew upgrade keelbox`, and one in `/usr/bin`, such as an Arch package, names the package manager's update.
 - Where the binary's directory is not writable, run it with `sudo`.
 
 What is verified before the binary is replaced: [installing and updating](release.md#installing-and-updating-keelbox).

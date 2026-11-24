@@ -329,14 +329,26 @@ func TestInitWritesTheProvidersTarget(t *testing.T) {
 	}
 }
 
-func TestSelfUpdateLeavesHomebrewAlone(t *testing.T) {
-	for exe, want := range map[string]string{
-		"/opt/homebrew/Cellar/keelbox/0.1.0/bin/keelbox":              "brew upgrade keelbox",
-		"/home/linuxbrew/.linuxbrew/Cellar/keelbox/0.1.0/bin/keelbox": "brew upgrade keelbox",
-		"/home/you/.local/bin/keelbox":                                "",
+func TestSelfUpdateLeavesPackageManagersAlone(t *testing.T) {
+	arch := false
+	defer func(f func() bool) { onArch = f }(onArch)
+	onArch = func() bool { return arch }
+	for _, c := range []struct {
+		exe  string
+		arch bool
+		by   string
+		cmd  string
+	}{
+		{"/opt/homebrew/Cellar/keelbox/0.1.0/bin/keelbox", false, "Homebrew", "brew upgrade keelbox"},
+		{"/home/linuxbrew/.linuxbrew/Cellar/keelbox/0.1.0/bin/keelbox", false, "Homebrew", "brew upgrade keelbox"},
+		{"/usr/bin/keelbox", true, "an Arch package", "yay -Syu (or your AUR helper's update)"},
+		{"/usr/bin/keelbox", false, "your system's package manager", "your package manager's upgrade"},
+		{"/home/you/.local/bin/keelbox", true, "", ""},
+		{"/usr/local/bin/keelbox", true, "", ""},
 	} {
-		if got := packageManager(exe); got != want {
-			t.Errorf("%s: %q, want %q", exe, got, want)
+		arch = c.arch
+		if by, cmd := packageManager(c.exe); by != c.by || cmd != c.cmd {
+			t.Errorf("%s (arch %v): %q %q, want %q %q", c.exe, c.arch, by, cmd, c.by, c.cmd)
 		}
 	}
 }
