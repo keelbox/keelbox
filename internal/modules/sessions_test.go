@@ -120,6 +120,10 @@ func TestTmuxStatusLineNamesTheBoxAndHowToLeave(t *testing.T) {
 	if !strings.Contains(right, "#[fg=#95a1b5] #{?#{e|>=:#{client_width},80},Ctrl-b d  leave#, everything keeps running,Ctrl-b d  leave} ") {
 		t.Errorf("status-right lacks the way to leave: %s", right)
 	}
+	// The box name opens every session and window, however narrow the bar.
+	if !strings.Contains(conf, "\nbind -Troot MouseDown1StatusLeft choose-tree -Zw\n") {
+		t.Error("clicking the box name does not open the session and window list")
+	}
 	if got := tmuxOption(conf, "status-style"); got != "bg=#1b2330,fg=#95a1b5" {
 		t.Errorf("status-style: %s", got)
 	}
