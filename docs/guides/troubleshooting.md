@@ -88,6 +88,18 @@ keelbox apply acme --adopt
 
 See [a machine already in use](machine-in-use.md) for what that accepts.
 
+### An LXC container
+
+`acme is an LXC container, and nothing has changed`. Rootless Docker and the agents' sandboxes need nesting on, and Tailscale needs `/dev/net/tun`. Only the container's host can change either. The message names the commands for LXD and Incus with the container's name, and for Proxmox with `CTID`, the container's number. On Proxmox:
+
+```sh
+pct set CTID --features nesting=1,keyctl=1
+pct set CTID --dev0 /dev/net/tun
+pct reboot CTID
+```
+
+In the Proxmox web interface, nesting is under the container's Options, Features, and the device under Resources, Add, Device Passthrough. Then run `keelbox apply acme`. Doctor runs the same checks as `container-nesting` and `container-tun`.
+
 ### Another keelbox apply is running
 
 An apply started on the box holds the lock. Wait, or look for a stuck one:

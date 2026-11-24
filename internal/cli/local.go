@@ -100,6 +100,12 @@ func runLocal(ctx context.Context, cmd string, cfg *config.Config, o options, st
 		}
 		return Plan(ctx, env, modules.All(), stdout)
 	case "apply":
+		// Before anything changes, here or in a detached run: a container
+		// setting only its host can change stops part of the box.
+		if err := modules.CheckContainer(ctx, env); err != nil {
+			fail(stderr, err)
+			return 1
+		}
 		if os.Getenv(envDetach) == "1" {
 			return startRun(ctx, env, o, stdout, stderr)
 		}

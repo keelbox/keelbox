@@ -86,6 +86,10 @@ type sim struct {
 	// package to the installed ones apt would remove to install it.
 	noPackage map[string]bool
 	conflicts map[string][]string
+	// lxc makes the box an LXC container; nestingOff and noTun are its
+	// host's settings: no new user namespace may mount /proc, and
+	// /dev/net/tun does not open.
+	lxc, nestingOff, noTun bool
 }
 
 // simSelf is the running keelbox, as the ssh provider stages it.
@@ -223,6 +227,18 @@ func (s *sim) run(c system.Cmd) (system.Result, error) {
 		return ""
 	}
 	switch c.Name {
+	case "systemd-detect-virt":
+		if s.lxc {
+			return res("lxc\n")
+		}
+		r := system.Result{Stdout: "none\n", ExitCode: 1}
+		return r, &system.ExitError{Cmd: c, Result: r}
+	case "unshare":
+		if s.nestingOff && strings.Contains(strings.Join(a, " "), "--mount-proc") {
+			r := system.Result{Stderr: "unshare: mount /proc failed: Operation not permitted\n", ExitCode: 1}
+			return r, &system.ExitError{Cmd: c, Result: r}
+		}
+		return res("")
 	case "dpkg":
 		return res("amd64\n")
 	case "nproc":
@@ -833,6 +849,12 @@ func (s *sim) run(c system.Cmd) (system.Result, error) {
 		}
 		return res(`[{"ifname":"tailscale0","addr_info":[` + strings.Join(info, ",") + `]}]`)
 	case "bash", "sh":
+		if arg(1) == tunProbe.Args[1] {
+			if s.noTun {
+				return failed(c)
+			}
+			return res("")
+		}
 		if s.installerFails {
 			return failed(c)
 		}
