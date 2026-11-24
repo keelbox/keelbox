@@ -148,7 +148,7 @@ func (s *SSH) choose(offered []HostKey) ([]HostKey, error) {
 			}
 		}
 		return nil, &HostKeyError{Host: s.Host, Want: s.HostKey, Offered: offered,
-			msg: fmt.Sprintf("%s does not offer the pinned host key %s (it offers %s); refusing to connect. If the server was reinstalled, check the new key in the provider's console and set target.ssh.host_key to it", s.Host, s.HostKey, fingerprints(offered))}
+			msg: fmt.Sprintf("%s does not offer the pinned host key %s; it offers %s. Refusing to connect. If the server was reinstalled, check the new key in the provider's console and set target.ssh.host_key to it", s.Host, s.HostKey, fingerprints(offered))}
 	}
 	if s.ConfirmKeys == nil {
 		return nil, &HostKeyError{Host: s.Host, Offered: offered,

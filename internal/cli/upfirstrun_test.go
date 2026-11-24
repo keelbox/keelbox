@@ -153,7 +153,7 @@ func TestUpFirstConnectionErrorsEndWithTheCommand(t *testing.T) {
 		"a host key that is not the one given": {
 			err:  &provider.HostKeyError{Host: "10.0.0.5", Want: given, Offered: offered},
 			args: []string{"--host-key", given},
-			want: []string{"10.0.0.5 does not offer the host key " + given + " given for it (it offers " + rsa + " (ssh-rsa), " + ed + " (ssh-ed25519)), so keelbox did not connect.",
+			want: []string{"10.0.0.5 does not offer the host key " + given + " given for it; it offers " + rsa + " (ssh-rsa), " + ed + " (ssh-ed25519). keelbox did not connect.",
 				// The key it offers instead is not handed back as the answer.
 				"and pass that one: keelbox up lab --provider ssh --host 10.0.0.5 --host-key SHA256:... --ssh-key " + key + " --yes\n"},
 		},
