@@ -145,7 +145,7 @@ func TestUpFirstConnectionErrorsEndWithTheCommand(t *testing.T) {
 		"a host key nobody can confirm": {
 			err:  &provider.HostKeyError{Host: "10.0.0.5", Offered: offered},
 			args: []string{"--ssh-user", "ubuntu"},
-			want: []string{"10.0.0.5 is not a host keelbox has connected to, and no terminal is attached to confirm its host key. It offers ssh-rsa " + rsa + ", ssh-ed25519 " + ed + ". " +
+			want: []string{"10.0.0.5 is not a host keelbox has connected to, and no terminal is attached to confirm its host key. It offers " + rsa + " (ssh-rsa), " + ed + " (ssh-ed25519). " +
 				"Read the server's key in the provider's console, or ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the server; if it is one of these, pass it: " +
 				// Not filled in: the command does not run until someone has compared.
 				"keelbox up lab --provider ssh --host 10.0.0.5 --ssh-user ubuntu --host-key SHA256:... --ssh-key " + key + " --yes\n"},
@@ -153,7 +153,7 @@ func TestUpFirstConnectionErrorsEndWithTheCommand(t *testing.T) {
 		"a host key that is not the one given": {
 			err:  &provider.HostKeyError{Host: "10.0.0.5", Want: given, Offered: offered},
 			args: []string{"--host-key", given},
-			want: []string{"10.0.0.5 does not offer the host key " + given + " given for it (it offers ssh-rsa " + rsa + ", ssh-ed25519 " + ed + "), so keelbox did not connect.",
+			want: []string{"10.0.0.5 does not offer the host key " + given + " given for it (it offers " + rsa + " (ssh-rsa), " + ed + " (ssh-ed25519)), so keelbox did not connect.",
 				// The key it offers instead is not handed back as the answer.
 				"and pass that one: keelbox up lab --provider ssh --host 10.0.0.5 --host-key SHA256:... --ssh-key " + key + " --yes\n"},
 		},

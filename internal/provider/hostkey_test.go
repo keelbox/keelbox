@@ -67,7 +67,7 @@ func TestChooseNeverTrustsSilently(t *testing.T) {
 	var hk *HostKeyError
 	if _, err := s.choose(offered); err == nil || !strings.Contains(err.Error(), fp) {
 		t.Errorf("no terminal, no pin: %v", err)
-	} else if !errors.As(err, &hk) || hk.Host != "box" || hk.Want != "" || hk.Fingerprints() != "ssh-ed25519 "+fp {
+	} else if !errors.As(err, &hk) || hk.Host != "box" || hk.Want != "" || hk.Fingerprints() != fp+" (ssh-ed25519)" {
 		t.Errorf("no terminal, no pin: not a host key error a caller can word itself: %+v", hk)
 	}
 	s.HostKey = fp

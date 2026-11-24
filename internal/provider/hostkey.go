@@ -110,7 +110,9 @@ type HostKeyError struct {
 
 func (e *HostKeyError) Error() string { return e.msg }
 
-// Fingerprints lists the keys the host offered, "type fingerprint" each.
+// Fingerprints lists the keys the host offered, "fingerprint (type)" each:
+// the fingerprint first, so what is copied is what target.ssh.host_key and
+// --host-key accept.
 func (e *HostKeyError) Fingerprints() string { return fingerprints(e.Offered) }
 
 // TrustHost makes sure the host key is pinned before the first connection.
@@ -161,7 +163,7 @@ func (s *SSH) choose(offered []HostKey) ([]HostKey, error) {
 func fingerprints(keys []HostKey) string {
 	var fs []string
 	for _, k := range keys {
-		fs = append(fs, k.Type+" "+k.Fingerprint())
+		fs = append(fs, k.Fingerprint()+" ("+k.Type+")")
 	}
 	return strings.Join(fs, ", ")
 }
