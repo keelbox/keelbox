@@ -4,7 +4,7 @@
 keelbox up
 ```
 
-The first question of `keelbox up` is where the box runs: a new cloud server, or a machine you already have. Either needs Ubuntu 24.04 or 26.04 with internet access, on amd64 or arm64. One or two agents need 2 vCPU and 4 GB of memory.
+The first question of `keelbox up` is where the box runs: a new cloud server, or a machine you already have. Either needs Ubuntu 24.04 or 26.04 with internet access over IPv4, on amd64 or arm64. An IPv6-only server needs NAT64 with DNS64, because GitHub has no IPv6 address. One or two agents need 2 vCPU and 4 GB of memory.
 
 ## A new cloud server
 

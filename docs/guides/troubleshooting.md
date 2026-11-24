@@ -88,6 +88,14 @@ keelbox apply acme --adopt
 
 See [a machine already in use](machine-in-use.md) for what that accepts.
 
+### The box reaches the internet over IPv6 only
+
+`acme reaches the internet over IPv6 only`. Caddy, mise, restic and the tmux plugins come from GitHub, which has no IPv6 address, so apply stops before it changes anything. Give the server an IPv4 address in your provider's console, or route it through NAT64 with DNS64, then apply again:
+
+```sh
+keelbox apply acme
+```
+
 ### Another keelbox apply is running
 
 An apply started on the box holds the lock. Wait, or look for a stuck one:

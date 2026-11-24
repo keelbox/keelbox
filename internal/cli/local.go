@@ -114,6 +114,9 @@ func runLocal(ctx context.Context, cmd string, cfg *config.Config, o options, st
 			fail(stderr, err)
 			return 1
 		}
+		if !ipv4Gate(ctx, env, stderr) {
+			return 1
+		}
 		if !firstApplyGate(ctx, env, modules.All(), stderr) {
 			return 1
 		}
