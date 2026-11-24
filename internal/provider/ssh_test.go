@@ -310,3 +310,22 @@ func TestSessionOptsGiveUpSooner(t *testing.T) {
 		t.Errorf("with LostAfter: %s", got)
 	}
 }
+
+// scp reads "host:path", so an IPv6 address goes in brackets; ssh takes it
+// bare.
+func TestSCPDestBracketsIPv6(t *testing.T) {
+	for host, want := range map[string]string{
+		"203.0.113.7":                         "admin@203.0.113.7",
+		"devbox.example":                      "admin@devbox.example",
+		"2001:db8::7":                         "admin@[2001:db8::7]",
+		"fd42:6b62:7636:0:216:3eff:fea0:8252": "admin@[fd42:6b62:7636:0:216:3eff:fea0:8252]",
+	} {
+		s := &SSH{User: "admin", Host: host}
+		if got := s.scpDest(); got != want {
+			t.Errorf("%s: scp target %q, want %q", host, got, want)
+		}
+		if got := s.dest(); got != "admin@"+host {
+			t.Errorf("%s: ssh target %q", host, got)
+		}
+	}
+}
