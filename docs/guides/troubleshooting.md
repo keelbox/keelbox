@@ -88,9 +88,9 @@ keelbox apply acme --adopt
 
 See [a machine already in use](machine-in-use.md) for what that accepts.
 
-### The box reaches the internet over IPv6 only
+### The box cannot reach GitHub
 
-`acme reaches the internet over IPv6 only`. Caddy, mise, restic and the tmux plugins come from GitHub, which has no IPv6 address, so apply stops before it changes anything. Give the server an IPv4 address in your provider's console, or route it through NAT64 with DNS64, then apply again:
+`acme reaches the internet over IPv6 only`, or `acme cannot reach github.com`. Caddy, mise, restic and the tmux plugins come from GitHub, which has no IPv6 address, so the first apply checks it can reach github.com and stops before it changes anything when it cannot. Give the server IPv4 internet access (in your provider's console, or on its network), or route an IPv6-only server through NAT64 with DNS64. A server with only a private IPv4 address needs NAT. Then apply again:
 
 ```sh
 keelbox apply acme

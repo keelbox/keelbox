@@ -329,6 +329,7 @@ Flags:
 Each step is checked, changed if needed and checked again. A failed step stops the run, except an agent CLI that fails to install: the run continues and exits 1. Every apply is recorded in the [logbook](box-files.md#logbook).
 
 - With provider `ssh` and an `--ssh-user` other than `target.ssh.user`, apply runs twice: as that account, then as the admin. The second run locks [the image's default account](../guides/adopting-a-box.md#the-images-default-account).
+- The first apply stops before any change, exit 1, when the box cannot reach github.com: [no IPv4 internet access](../guides/troubleshooting.md#the-box-cannot-reach-github).
 - The first apply stops before any change, exit 1, when `plan --impact` marks an item. `--adopt` accepts them: [a machine already in use](../guides/machine-in-use.md).
 - A box last applied with a newer release is refused without `--allow-downgrade`: [updates](../guides/upgrades.md).
 - Only `apply` installs `/usr/local/bin/keelbox` on the box, keeping the binary it replaces for `rollback`.

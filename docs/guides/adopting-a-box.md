@@ -9,7 +9,7 @@ Two answers to the first question set up a server that keelbox does not create:
 - **1, An existing server (SSH)**: a server you already log in to.
 - **4, A server I create myself (cloud-config)**: a new server at any provider, started from a snippet keelbox prints.
 
-The server must run Ubuntu 24.04 or 26.04 on amd64 or arm64, with internet access. Agents and access, and Sign in, work as for [your first box](../getting-started.md).
+The server must run Ubuntu 24.04 or 26.04 on amd64 or arm64, with internet access over IPv4. An IPv6-only server needs NAT64 with DNS64, because GitHub has no IPv6 address. Agents and access, and Sign in, work as for [your first box](../getting-started.md).
 
 ## A server you reach over SSH
 

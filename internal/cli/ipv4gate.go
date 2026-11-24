@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 
@@ -9,37 +10,53 @@ import (
 	"github.com/keelbox/keelbox/internal/system"
 )
 
-// githubProbe is fetched to learn whether the box reaches GitHub, where
-// Caddy, mise and restic come from (releases) and the tmux plugins (git).
-// github.com has no IPv6 address.
+// githubProbe asks github.com for its headers, with the TLS floor of the
+// downloads. Caddy, mise and restic come from GitHub's releases and the
+// tmux plugins from github.com, which has no IPv6 address. There is no -f:
+// any HTTP answer, a 429 included, shows the box reaches GitHub; only a
+// failure to connect (DNS, refused, unreachable, timeout, TLS) counts.
 var githubProbe = system.Cmd{
 	Name: "curl",
-	Args: []string{"--proto", "=https", "--tlsv1.2", "-fsS", "-o", "/dev/null", "--head",
+	Args: []string{"--proto", "=https", "--tlsv1.2", "-sS", "-o", "/dev/null", "--head",
 		"--max-time", "10", "--retry", "2", "--retry-all-errors", "https://github.com/"},
 	Timeout: 45 * time.Second,
 }
 
-// ipv4Gate stops an apply before any change on a box that reaches the
-// internet over IPv6 only: apply would otherwise stop part-way, at the
-// first download from GitHub. A box with an IPv4 default route passes
-// without a request, so an ordinary apply costs nothing and a GitHub outage
-// is left to the step that downloads. Without one, the probe is a real
-// request with the same curl the downloads use, so a box that reaches
-// GitHub through NAT64 and DNS64, 464XLAT or a proxy passes; apply stops
-// only when it fails. Without curl, which Ubuntu's images have, there is
-// nothing to probe with and apply goes on.
+// curlHTTPError is curl's exit code for an HTTP error status under -f:
+// GitHub answered, so it is reachable.
+const curlHTTPError = 22
+
+// ipv4Gate stops the first apply, before any change, on a box that cannot
+// reach GitHub: an IPv6-only server, or one with a private IPv4 address and
+// no NAT. Such an apply would otherwise harden sshd, enable UFW and install
+// Tailscale and Docker, then stop at the first download from GitHub. The
+// probe is a real request, so a box that reaches GitHub through NAT64 and
+// DNS64, 464XLAT or a transparent proxy passes; the apply unit does not
+// read https_proxy. The IPv4 default route only picks the message. Later
+// applies never probe: the box was set up, and a GitHub outage must not
+// stop an apply that may need nothing from it. Without curl, which
+// Ubuntu's server and cloud images have, there is nothing to probe with
+// and apply goes on.
+//
+// runLocal calls it before firstApplyGate and before any change
+// (TestApplyGatesIPv4First pins the order).
 func ipv4Gate(ctx context.Context, e *engine.Env, stderr io.Writer) bool {
-	routes, err := system.Output(ctx, e.X, system.C("ip", "-4", "route", "show", "default"))
-	if err != nil || routes != "" {
+	if !neverApplied(e) {
 		return true
 	}
 	if st, err := e.X.Stat("/usr/bin/curl"); err != nil || !st.Exists {
 		return true
 	}
-	if system.Succeeds(ctx, e.X, githubProbe) {
+	_, err := e.X.Run(ctx, githubProbe)
+	var exit *system.ExitError
+	if err == nil || (errors.As(err, &exit) && exit.Result.ExitCode == curlHTTPError) {
 		return true
 	}
-	failf(stderr, "%s reaches the internet over IPv6 only, and github.com, where Caddy, mise, restic and the tmux plugins come from, has no IPv6 address. Nothing has changed. Give the server an IPv4 address in your provider's console (or route it through NAT64 with DNS64), then: keelbox apply %s\n",
-		e.Cfg.Box, e.Cfg.Box)
+	box := e.Cfg.Box
+	if routes, rerr := system.Output(ctx, e.X, system.C("ip", "-4", "route", "show", "default")); rerr == nil && routes == "" {
+		failf(stderr, "%s reaches the internet over IPv6 only, and github.com, where Caddy, mise, restic and the tmux plugins come from, has no IPv6 address. Nothing has changed. Give the server IPv4 internet access (in your provider's console, or on its network), or route it through NAT64 with DNS64, then: keelbox apply %s\n", box, box)
+		return false
+	}
+	failf(stderr, "%s cannot reach github.com, where Caddy, mise, restic and the tmux plugins come from: its network may block it (a private IPv4 address without NAT, or a firewall), or GitHub may be down. Nothing has changed. Give the server internet access to github.com on port 443, then: keelbox apply %s\n", box, box)
 	return false
 }
