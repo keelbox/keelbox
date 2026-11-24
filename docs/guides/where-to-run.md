@@ -39,6 +39,8 @@ What to install and how to narrow each sign-in: [cloud sign-ins and permissions]
 
 None of these needs a token or a cloud sign-in. The firewall is UFW on the box, with no cloud firewall in front unless you add one.
 
+An LXC container (Proxmox, LXD or Incus) works with nesting on and the TUN device for Tailscale. Apply checks both first and refuses a container without them, so a container plan whose host you cannot change will not work: [an LXC container](troubleshooting.md#an-lxc-container).
+
 keelbox does not create, resize, park or delete these machines. `keelbox forget` stops managing one and leaves it as it was set up.
 
 On a machine that already runs other software, `keelbox up` first lists what it would replace and asks. A machine at home is reachable only while awake; `host.power.sleep: never` in the config stops it suspending.

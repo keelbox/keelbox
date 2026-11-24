@@ -90,15 +90,27 @@ See [a machine already in use](machine-in-use.md) for what that accepts.
 
 ### An LXC container
 
-`acme is an LXC container, and nothing has changed`. Rootless Docker and the agents' sandboxes need nesting on, and Tailscale needs `/dev/net/tun`. Only the container's host can change either. The message names the commands for LXD and Incus with the container's name, and for Proxmox with `CTID`, the container's number. On Proxmox:
+`acme is an LXC container, and nothing has changed`. Rootless Docker and the agents' sandboxes need nesting on, and Tailscale needs `/dev/net/tun`. Only the container's host can change either, so the message prints the commands for it. Run them there, then `keelbox apply acme`.
+
+On LXD or Incus the commands carry the container's name, or `NAME` when keelbox cannot read it; add `--project` or a `remote:` prefix as you would for that container. `Device already exists` means a `tun` device is there but does not work: `lxc config device remove NAME tun`, then add it again.
+
+### A Proxmox container
+
+`CTID` is the container's number. `pct set` replaces the whole features list and the whole `devN` entry, so read them first:
 
 ```sh
-pct set CTID --features nesting=1,keyctl=1
-pct set CTID --dev0 /dev/net/tun
+pct config CTID | grep -E '^(features|dev[0-9])'
+pct set CTID --features nesting=1,keyctl=1   # keep the features listed above, comma-separated
+pct set CTID --dev1 /dev/net/tun             # a devN not listed above
 pct reboot CTID
 ```
 
-In the Proxmox web interface, nesting is under the container's Options, Features, and the device under Resources, Add, Device Passthrough. Then run `keelbox apply acme`. Doctor runs the same checks as `container-nesting` and `container-tun`.
+In the web interface: Options, Features for nesting; Resources, Add, Device Passthrough for the device. `--devN` needs Proxmox 8.1 or later. On older releases, add these lines to `/etc/pve/lxc/CTID.conf`, then reboot the container:
+
+```text
+lxc.cgroup2.devices.allow: c 10:200 rwm
+lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
+```
 
 ### Another keelbox apply is running
 
@@ -153,6 +165,10 @@ keelbox up acme
 
 ## Doctor failures
 
+### A container setting
+
+`container-nesting` or `container-tun` fails: the container's host must change a setting. `keelbox apply acme` prints the commands; see [an LXC container](#an-lxc-container).
+
 ### An SSH setting
 
 `ssh-password-auth`, `ssh-kbd-interactive`, `ssh-root-login` or `ssh-agent-forwarding` fails. A file that sorts before `01-keelbox.conf` in `/etc/ssh/sshd_config.d/`, or a `Match` block in `sshd_config`, overrides keelbox's setting. Find it as the admin, remove it, and apply:
@@ -199,6 +215,8 @@ Its log, as the agent: `journalctl --user -u keelbox-claude-remote-control.servi
 ### Agent sandboxes
 
 Doctor fails `sandbox` or `codex-sandbox`, or Codex stops with `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`. Claude Code and Codex run commands under bwrap, which Ubuntu allows only with an AppArmor profile; on 24.04 keelbox loads Ubuntu's as `/etc/apparmor.d/keelbox-bwrap`.
+
+In an LXC container, `bwrap: Can't mount proc on /newroot/proc: Operation not permitted` means nesting is off: see [an LXC container](#an-lxc-container).
 
 Run `keelbox apply acme` first. If the step `bwrap-userns` fails, the box's apt sources lack `noble-updates`, where Ubuntu ships the profile. Otherwise, as the admin:
 

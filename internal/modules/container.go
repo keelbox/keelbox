@@ -16,8 +16,8 @@ import (
 // the box can work, and neither can be changed from inside it (ADR 0092):
 //
 //   - nesting: rootless Docker and the agent CLIs' sandboxes (bwrap) mount
-//     /proc in a new user namespace, which LXC's AppArmor profile refuses
-//     unless nesting is on. LXD and Incus leave it off by default.
+//     /proc in a new user namespace, which an LXC container without nesting
+//     refuses. LXD and Incus leave it off by default.
 //   - /dev/net/tun: tailscaled needs the TUN device, which Proxmox does not
 //     pass to an unprivileged container by default.
 //
@@ -28,14 +28,22 @@ import (
 type ContainerLimit struct {
 	Check   string // doctor's name for it
 	Problem string // what it stops, in a phrase
-	Fix     []string
 }
 
-// lxcHost is the container manager, for naming the fix.
+// The container managers keelbox names fixes for. A guest API socket says
+// which one runs the container; without one it may be Proxmox, or LXD or
+// Incus with that API turned off, or plain LXC.
+const (
+	hostUnknown = iota
+	hostLXD
+	hostIncus
+	hostLXDOrIncus // both sockets: not Proxmox, but not which of the two
+)
+
+// lxcHost is the container's manager and its name there.
 type lxcHost struct {
-	tool    string // lxc, incus, or "" for Proxmox and other LXC hosts
-	product string // LXD, Incus
-	name    string // the container's name, as the host knows it
+	kind int
+	name string // the container's name, or NAME when it cannot be known
 }
 
 // lxcContainer reports whether the box is an LXC container, and on which
@@ -46,27 +54,32 @@ func lxcContainer(ctx context.Context, e *engine.Env) (lxcHost, bool) {
 	if out != "lxc" {
 		return lxcHost{}, false
 	}
-	h := lxcHost{name: containerName(e)}
-	// The directory of their guest API socket says which one runs it. It
-	// belongs to the host's root, nobody in the container, so the directory
-	// itself is looked at, not the socket in it (root's file calls refuse a
-	// path through a directory another account owns).
-	for _, g := range []struct{ tool, product, dir string }{
-		{"lxc", "LXD", "/dev/lxd"},
-		{"incus", "Incus", "/dev/incus"},
-	} {
-		if st, err := e.X.Stat(g.dir); err == nil && st.Exists {
-			h.tool, h.product = g.tool, g.product
-		}
+	// The directory of the guest API socket belongs to the host's root,
+	// nobody in the container, so the directory itself is looked at, not
+	// the socket in it (root's file calls refuse a path through a
+	// directory another account owns).
+	has := func(dir string) bool { st, err := e.X.Stat(dir); return err == nil && st.Exists }
+	lxd, incus := has("/dev/lxd"), has("/dev/incus")
+	h := lxcHost{}
+	sock := ""
+	switch {
+	case lxd && incus:
+		h.kind = hostLXDOrIncus
+	case lxd:
+		h.kind, sock = hostLXD, "/dev/lxd/sock"
+	case incus:
+		h.kind, sock = hostIncus, "/dev/incus/sock"
 	}
+	h.name = containerName(ctx, e, sock)
 	return h, true
 }
 
-// containerName is the container's name as LXD or Incus knows it. Their
-// cloud-init datasource records it as local_hostname, which stays when
-// keelbox renames the host to the box; without it, the hostname, which they
-// set from the name at launch.
-func containerName(e *engine.Env) string {
+// containerName is the container's name as LXD or Incus knows it, which
+// their commands need. keelbox renames the host to the box, so the
+// hostname is the container's name only until the first apply; cloud-init's
+// local_hostname and the guest API's meta-data keep it. When neither
+// answers and the hostname is already the box's, it is NAME.
+func containerName(ctx context.Context, e *engine.Env, sock string) string {
 	if b, err := e.X.ReadFile("/run/cloud-init/instance-data.json"); err == nil {
 		var d struct {
 			V1 struct {
@@ -77,8 +90,21 @@ func containerName(e *engine.Env) string {
 			return d.V1.LocalHostname
 		}
 	}
-	if b, err := e.X.ReadFile("/etc/hostname"); err == nil && labelName(strings.TrimSpace(string(b))) {
-		return strings.TrimSpace(string(b))
+	if sock != "" {
+		// The guest API answers any host name; "guest" is a placeholder.
+		out, err := system.Output(ctx, e.X, system.Cmd{Name: "curl", Args: []string{"-fsS", "--max-time", "5", "--unix-socket", sock, "http://guest/1.0/meta-data"}, Timeout: 10 * time.Second})
+		if err == nil {
+			for _, l := range strings.Split(out, "\n") {
+				if v, found := strings.CutPrefix(strings.TrimSpace(l), "local-hostname:"); found && labelName(strings.TrimSpace(v)) {
+					return strings.TrimSpace(v)
+				}
+			}
+		}
+	}
+	if b, err := e.X.ReadFile("/etc/hostname"); err == nil {
+		if n := strings.TrimSpace(string(b)); labelName(n) && n != e.Cfg.Host.Hostname {
+			return n
+		}
 	}
 	return "NAME"
 }
@@ -103,72 +129,117 @@ var nestingProbe = system.Cmd{Name: "unshare", Args: []string{"--user", "--map-r
 // does not pass.
 var tunProbe = system.Cmd{Name: "sh", Args: []string{"-c", "[ -c /dev/net/tun ] && : <>/dev/net/tun"}, Timeout: 10 * time.Second}
 
-// ContainerLimits lists the container settings that stop part of this box:
-// none outside an LXC container. It changes nothing.
-func ContainerLimits(ctx context.Context, e *engine.Env) []ContainerLimit {
-	h, ok := lxcContainer(ctx, e)
-	if !ok {
-		return nil
+// nestingNeed is what needs nesting on this box, or "" when nothing does:
+// rootless Docker, and the agent CLIs' sandboxes.
+func nestingNeed(e *engine.Env) string {
+	switch docker, agents := e.Cfg.Docker(), len(e.Cfg.Agents) > 0; {
+	case docker && agents:
+		return "rootless Docker and the agents' sandboxes"
+	case docker:
+		return "rootless Docker"
+	case agents:
+		return "the agents' sandboxes"
 	}
+	return ""
+}
+
+// containerLimits lists the container settings that stop part of this box.
+// It changes nothing.
+func containerLimits(ctx context.Context, e *engine.Env) []ContainerLimit {
 	var out []ContainerLimit
-	if !system.Succeeds(ctx, e.X, nestingProbe) {
-		what := "the agents' sandboxes cannot start"
-		if e.Cfg.Docker() {
-			what = "rootless Docker and the agents' sandboxes cannot start"
-		}
-		out = append(out, ContainerLimit{Check: "container-nesting", Problem: "nesting is off, so " + what, Fix: h.nestingFix()})
+	if need := nestingNeed(e); need != "" && !system.Succeeds(ctx, e.X, nestingProbe) {
+		out = append(out, ContainerLimit{Check: "container-nesting", Problem: "nesting is off, so " + need + " cannot start"})
 	}
 	if e.Cfg.Tailscale() && !system.Succeeds(ctx, e.X, tunProbe) {
-		out = append(out, ContainerLimit{Check: "container-tun", Problem: "/dev/net/tun cannot be opened, so Tailscale cannot start", Fix: h.tunFix()})
+		out = append(out, ContainerLimit{Check: "container-tun", Problem: "/dev/net/tun cannot be opened, so Tailscale cannot start"})
 	}
 	return out
 }
 
-func (h lxcHost) nestingFix() []string {
-	if h.tool != "" {
-		return []string{h.tool + " config set " + h.name + " security.nesting=true"}
+func hasLimit(ls []ContainerLimit, check string) bool {
+	for _, l := range ls {
+		if l.Check == check {
+			return true
+		}
 	}
-	return []string{"pct set CTID --features nesting=1,keyctl=1"}
+	return false
 }
 
-func (h lxcHost) tunFix() []string {
-	if h.tool != "" {
-		return []string{h.tool + " config device add " + h.name + " tun unix-char path=/dev/net/tun"}
+// tool is the command for an LXD or Incus host.
+func (h lxcHost) tool() string {
+	if h.kind == hostIncus {
+		return "incus"
 	}
-	return []string{"pct set CTID --dev0 /dev/net/tun"}
+	return "lxc"
 }
 
-func (h lxcHost) restart() string {
-	if h.tool != "" {
-		return h.tool + " restart " + h.name
+// managerFix is the commands for LXD or Incus.
+func (h lxcHost) managerFix(ls []ContainerLimit) []string {
+	t := h.tool()
+	var out []string
+	if hasLimit(ls, "container-nesting") {
+		out = append(out, t+" config set "+h.name+" security.nesting=true")
 	}
-	return "pct reboot CTID"
+	if hasLimit(ls, "container-tun") {
+		out = append(out, t+" config device add "+h.name+" tun unix-char path=/dev/net/tun")
+	}
+	return append(out, t+" restart "+h.name)
+}
+
+// proxmoxFix is the commands for Proxmox. pct set replaces the whole
+// features list and a whole devN entry, so the user reads them first and
+// adds to them.
+func proxmoxFix(ls []ContainerLimit) []string {
+	out := []string{"pct config CTID | grep -E '^(features|dev[0-9])'"}
+	if hasLimit(ls, "container-nesting") {
+		out = append(out, "pct set CTID --features nesting=1,keyctl=1    # keep the features listed above, comma-separated")
+	}
+	if hasLimit(ls, "container-tun") {
+		out = append(out, "pct set CTID --dev1 /dev/net/tun    # a devN not listed above; Proxmox 8.1 or later")
+	}
+	return append(out, "pct reboot CTID")
 }
 
 // CheckContainer refuses to apply to an LXC container whose settings stop
 // part of the box, and names the commands that change them on its host.
 func CheckContainer(ctx context.Context, e *engine.Env) error {
-	limits := ContainerLimits(ctx, e)
-	if len(limits) == 0 {
+	h, in := lxcContainer(ctx, e)
+	if !in {
 		return nil
 	}
-	h, _ := lxcContainer(ctx, e)
+	ls := containerLimits(ctx, e)
+	if len(ls) == 0 {
+		return nil
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s is an LXC container, and nothing has changed:\n", e.Cfg.Box)
-	for _, l := range limits {
+	for _, l := range ls {
 		fmt.Fprintf(&b, "  - %s\n", l.Problem)
 	}
-	if h.tool != "" {
-		fmt.Fprintf(&b, "Run these on the %s host, then keelbox apply %s again:\n", h.product, e.Cfg.Box)
-	} else {
-		fmt.Fprintf(&b, "On Proxmox, CTID is the container's number. Run these on the Proxmox host, then keelbox apply %s again:\n", e.Cfg.Box)
-	}
-	for _, l := range limits {
-		for _, f := range l.Fix {
-			fmt.Fprintf(&b, "  %s\n", f)
+	block := func(lines []string) {
+		for _, l := range lines {
+			fmt.Fprintf(&b, "  %s\n", l)
 		}
 	}
-	fmt.Fprintf(&b, "  %s", h.restart())
+	nameNote := ""
+	if h.name == "NAME" {
+		nameNote = ", where NAME is the container's name"
+	}
+	switch h.kind {
+	case hostLXD, hostIncus:
+		product := map[int]string{hostLXD: "LXD", hostIncus: "Incus"}[h.kind]
+		fmt.Fprintf(&b, "Change them on the %s host%s:\n", product, nameNote)
+		block(h.managerFix(ls))
+	case hostLXDOrIncus:
+		fmt.Fprintf(&b, "Change them on the LXD host, or with incus for Incus%s:\n", nameNote)
+		block(h.managerFix(ls))
+	default:
+		b.WriteString("Change them on the container's host. On Proxmox, where CTID is the container's number:\n")
+		block(proxmoxFix(ls))
+		fmt.Fprintf(&b, "On LXD, or with incus for Incus%s:\n", nameNote)
+		block(h.managerFix(ls))
+	}
+	fmt.Fprintf(&b, "Then: keelbox apply %s", e.Cfg.Box)
 	return fmt.Errorf("%s", b.String())
 }
 
@@ -179,22 +250,34 @@ func verifyContainer(ctx context.Context, e *engine.Env) []engine.Finding {
 	if !in {
 		return nil
 	}
-	failed := map[string]ContainerLimit{}
-	for _, l := range ContainerLimits(ctx, e) {
-		failed[l.Check] = l
+	ls := containerLimits(ctx, e)
+	type check struct{ name, good string }
+	var checks []check
+	if nestingNeed(e) != "" {
+		checks = append(checks, check{"container-nesting", "LXC container with nesting on"})
 	}
-	checks := []struct{ name, good string }{{"container-nesting", "LXC container with nesting on"}}
 	if e.Cfg.Tailscale() {
-		checks = append(checks, struct{ name, good string }{"container-tun", "/dev/net/tun opens"})
+		checks = append(checks, check{"container-tun", "/dev/net/tun opens"})
 	}
 	var out []engine.Finding
 	for _, c := range checks {
-		l, bad := failed[c.name]
-		if !bad {
+		var l *ContainerLimit
+		for i := range ls {
+			if ls[i].Check == c.name {
+				l = &ls[i]
+			}
+		}
+		if l == nil {
 			out = append(out, ok("host", c.name, c.good))
 			continue
 		}
-		out = append(out, fail("host", c.name, l.Problem+"; on the container's host: "+strings.Join(append(l.Fix, h.restart()), ", then ")))
+		// On LXD or Incus with a known name the commands fit on the line;
+		// otherwise apply prints them, for Proxmox and LXD both.
+		detail := l.Problem + "; keelbox apply " + e.Cfg.Box + " prints the commands for the container's host"
+		if (h.kind == hostLXD || h.kind == hostIncus) && h.name != "NAME" {
+			detail = l.Problem + "; on the container's host: " + strings.Join(h.managerFix([]ContainerLimit{*l}), "; then ")
+		}
+		out = append(out, fail("host", c.name, detail))
 	}
 	return out
 }

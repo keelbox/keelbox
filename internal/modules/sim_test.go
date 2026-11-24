@@ -90,6 +90,9 @@ type sim struct {
 	// host's settings: no new user namespace may mount /proc, and
 	// /dev/net/tun does not open.
 	lxc, nestingOff, noTun bool
+	// guestName is what LXD's or Incus's guest API reports as the
+	// container's local-hostname; "" when it does not answer.
+	guestName string
 }
 
 // simSelf is the running keelbox, as the ssh provider stages it.
@@ -685,6 +688,12 @@ func (s *sim) run(c system.Cmd) (system.Result, error) {
 		d := fmt.Sprintf("/tmp/keelbox.%d", s.tmpN)
 		return res(d + "\n")
 	case "curl":
+		if strings.Contains(strings.Join(a, " "), "--unix-socket") {
+			if s.guestName == "" {
+				return failed(c)
+			}
+			return res("instance-id: 1\nlocal-hostname: " + s.guestName + "\n")
+		}
 		if arg(0) == "-fsSI" {
 			return res("HTTP/2 200\n")
 		}
