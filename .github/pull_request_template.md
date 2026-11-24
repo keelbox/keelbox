@@ -8,8 +8,11 @@
 ## Checklist
 - [ ] `make check` passes
 - [ ] New or changed steps have a sim test, and `TestApplyConvergesAndIsIdempotent` passes
-- [ ] Docs updated where behaviour changed (README, ADR for a decision)
+- [ ] Docs updated where behaviour changed (`docs/reference/`, the guides, an ADR for a decision), or none needed
 - [ ] AI assistance disclosed below, if any, and I have reviewed every line
 
 ## AI assistance
 <!-- None, or which agent and for what. See CONTRIBUTING.md. -->
+
+## Review
+<!-- If an agent wrote this: what a separate agent's review found, and what changed. See AGENTS.md. -->
