@@ -23,10 +23,10 @@ func TestIPv4GateStopsOnlyAnIPv6OnlyBox(t *testing.T) {
 		routes       string
 		pass, probed bool
 	}{
-		{name: "IPv4 box", curl: true, reach: true, routes: route, pass: true, probed: true},
+		{name: "IPv4 box", curl: true, reach: true, routes: route, pass: true, probed: false},
 		{name: "IPv6 only behind NAT64", curl: true, reach: true, routes: "", pass: true, probed: true},
 		{name: "IPv6 only", curl: true, reach: false, routes: "", pass: false, probed: true},
-		{name: "IPv4 box, GitHub down", curl: true, reach: false, routes: route, pass: true, probed: true},
+		{name: "IPv4 box, GitHub down", curl: true, reach: false, routes: route, pass: true, probed: false},
 		{name: "no curl", curl: false, reach: false, routes: "", pass: true, probed: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

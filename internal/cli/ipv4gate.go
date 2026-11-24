@@ -21,22 +21,22 @@ var githubProbe = system.Cmd{
 
 // ipv4Gate stops an apply before any change on a box that reaches the
 // internet over IPv6 only: apply would otherwise stop part-way, at the
-// first download from GitHub. The probe is a real request with the same
-// curl the downloads use, so a box that reaches GitHub through NAT64 and
-// DNS64, 464XLAT or a proxy passes. Apply stops only when the probe fails
-// and the box has no IPv4 default route; any other failure, an outage on
-// GitHub's side say, is left to the step that downloads. Without curl,
-// which Ubuntu's images have, there is nothing to probe with and apply goes
-// on.
+// first download from GitHub. A box with an IPv4 default route passes
+// without a request, so an ordinary apply costs nothing and a GitHub outage
+// is left to the step that downloads. Without one, the probe is a real
+// request with the same curl the downloads use, so a box that reaches
+// GitHub through NAT64 and DNS64, 464XLAT or a proxy passes; apply stops
+// only when it fails. Without curl, which Ubuntu's images have, there is
+// nothing to probe with and apply goes on.
 func ipv4Gate(ctx context.Context, e *engine.Env, stderr io.Writer) bool {
+	routes, err := system.Output(ctx, e.X, system.C("ip", "-4", "route", "show", "default"))
+	if err != nil || routes != "" {
+		return true
+	}
 	if st, err := e.X.Stat("/usr/bin/curl"); err != nil || !st.Exists {
 		return true
 	}
 	if system.Succeeds(ctx, e.X, githubProbe) {
-		return true
-	}
-	routes, err := system.Output(ctx, e.X, system.C("ip", "-4", "route", "show", "default"))
-	if err != nil || routes != "" {
 		return true
 	}
 	failf(stderr, "%s reaches the internet over IPv6 only, and github.com, where Caddy, mise, restic and the tmux plugins come from, has no IPv6 address. Nothing has changed. Give the server an IPv4 address in your provider's console (or route it through NAT64 with DNS64), then: keelbox apply %s\n",
