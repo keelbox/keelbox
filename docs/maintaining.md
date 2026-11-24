@@ -37,7 +37,7 @@ New issues arrive with `needs-triage` from the issue forms. For each: `gh issue 
 5. Label the area (`area: cli`, `area: modules`, `area: providers`, `area: release`) and, where it fits, `good first issue` or `help wanted`. Out of scope per `CONTEXT.md`: explain, label `wontfix`, close.
 6. Remove `needs-triage`.
 
-Pull requests: `pull-request.yml` checks the title and labels areas. Review against CONTRIBUTING.md (tests, disclosure of AI assistance, one logical change), then squash-merge. Dependabot PRs (`dependencies`): merge when CI is green; major action bumps need a look at the changelog.
+Pull requests: `pull-request.yml` checks the title and labels areas. Review against CONTRIBUTING.md (tests, disclosure of AI assistance, one logical change, and for an agent-written PR a filled Review section from a separate agent, per AGENTS.md), then squash-merge. Dependabot PRs (`dependencies`): merge when CI is green; major action bumps need a look at the changelog.
 
 Labels are defined in `scripts/labels.sh`; rerun it after changing them.
 

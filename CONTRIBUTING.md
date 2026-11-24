@@ -41,6 +41,7 @@ Agents are welcome here; keelbox is built with them. The rules are about account
 - **A human is accountable.** You open the pull request, you have read and understood every line, and you answer review questions yourself. Do not submit output you cannot explain.
 - **Tests are required.** Agent-written code needs the same tests as any other, and `make check` must pass locally before you push. "The agent said it works" is not a test.
 - **Disclose it.** Say in the pull request which agent you used and for what (the template has a section). Agent co-authorship trailers such as `Co-Authored-By:` are fine.
+- **Have it reviewed.** If an agent wrote the change, have a fresh agent session review it before you ask for a merge, and note what it found under Review in the template (details in `AGENTS.md`).
 - **Keep it small.** One logical change per pull request. Large generated diffs, drive-by reformatting and speculative abstractions will be closed.
 - **No secrets in prompts or transcripts.** Never paste tokens, keys or private box details into a hosted agent, and never commit transcripts.
 

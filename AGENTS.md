@@ -57,9 +57,12 @@ Go (version pinned in `mise.toml`, run everything through `mise exec --`), singl
 ## Git
 Conventional Commits: `type(scope): summary`, types and scopes in `CONTRIBUTING.md`. Pull requests are squash-merged with the title as the commit. Small logical commits. `CHANGELOG.md`: release-please writes final-release entries from the commits, and the maintainer cuts release candidates by hand (`docs/maintaining.md`); contributors never edit it.
 
-Before a pull request is merged:
-- **Docs match the behaviour.** A change to what a user sees or what lands on a box updates, in the same PR, every page that describes it (see Docs above), and adds an ADR for a decision. If nothing needs changing, the PR body says so.
-- **A separate agent reviews it.** With CI green, a fresh agent that did not write the change (not a fork of the author's session) is given only the PR and this file. It reviews the diff for correctness, tests, the rules here and the docs point above. Each finding is fixed or answered in the PR, and the PR body ends with a short Review note: what was found and what changed.
+## Pull requests
+Before an agent-written pull request is merged (Dependabot and release-please PRs excepted):
+- The pages in Docs above are updated in the same PR. If none needed changing, the PR body says so.
+- A separate agent reviews it: a new session with none of the author's context, not a fork or subagent that inherits it. It is given the PR number and this file, reads whatever else it needs, and reviews the change for correctness, tests, the rules here and the docs. Each finding is fixed or answered in the PR, and the PR's Review section says in a line or two what was found and what changed.
+
+A contributor without an agent leaves Review empty; the maintainer's review covers it.
 
 ## Releases
 `docs/maintaining.md` has the release and triage runbooks; `.agents/skills/` the matching skills (Claude links in `.claude/skills/`). `make test-install` smoke-tests the installer against a snapshot build. Distribution design: ADR 0013, superseded for integrity by ADR 0016 (release key, allowlisted hosts, index checksums).

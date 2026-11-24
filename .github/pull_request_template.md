@@ -8,7 +8,7 @@
 ## Checklist
 - [ ] `make check` passes
 - [ ] New or changed steps have a sim test, and `TestApplyConvergesAndIsIdempotent` passes
-- [ ] Docs updated where behaviour changed (`docs/reference/`, the guides, an ADR for a decision), or none needed
+- [ ] Docs updated where behaviour changed (README, `docs/reference/`, the guides, an ADR for a decision), or none needed (say why in What and why)
 - [ ] AI assistance disclosed below, if any, and I have reviewed every line
 
 ## AI assistance
