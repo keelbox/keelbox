@@ -21,9 +21,10 @@ To come back, run `keelbox attach acme` from any computer that has the box's con
 |---|---|
 | `Ctrl-b c` | A new window |
 | `Ctrl-b "` / `Ctrl-b %` | Split below / beside |
+| `Ctrl-b w` | Every session and window, to pick one |
 | `Ctrl-b r` | Reload `~/.tmux.conf` |
 
-The mouse works for windows, pane borders and scrolling.
+The mouse works for windows, pane borders and scrolling. The status line lists only this session's windows. Click the box name at its left, or press `Ctrl-b w`, to see every session and window and pick one with the mouse or the arrow keys and Enter.
 
 ## The welcome
 

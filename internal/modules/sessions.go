@@ -168,7 +168,10 @@ setw -g automatic-rename on
 
 %[3]s
 # Click a tab to select it; the + opens a new window. New windows and splits
-# inherit the active pane's directory.
+# inherit the active pane's directory. Clicking the box name on the left opens
+# every session and window full screen, as Ctrl-b w does: the status line
+# shows only this session's windows, and on a narrow screen not all of them.
+bind -Troot MouseDown1StatusLeft choose-tree -Zw
 bind -Troot MouseDown1Status if -F '#{==:#{mouse_status_range},window}' {
     select-window
 } {
