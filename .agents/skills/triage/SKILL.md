@@ -11,7 +11,7 @@ Follow the Triage runbook in `docs/maintaining.md`. Labels are defined in `scrip
 2. Per issue, in this order: security content (stop, tell the maintainer, do not comment publicly), duplicate, missing information, reproduction, labels, then remove `needs-triage`.
 3. Reproduce only in a fresh LXD VM named `kb-<something>`, deleted afterwards. Never on the host.
 4. Comment briefly and factually: what you checked, what you need. One question round per issue.
-5. Pull requests: check the title is a Conventional Commit, `make check` passed, steps have sim tests, AI assistance is disclosed. Leave a review; **do not merge** without the maintainer.
+5. Pull requests: check the title is a Conventional Commit, `make check` passed, steps have sim tests, AI assistance is disclosed, and an agent-written PR has a Review section from a separate agent (AGENTS.md, Pull requests). Leave a review; **do not merge** without the maintainer.
 6. Report a table: issue, action taken, labels, anything needing the maintainer.
 
 Closing as `wontfix` or out of scope needs the maintainer's agreement.
