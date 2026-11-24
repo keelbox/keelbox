@@ -375,6 +375,34 @@ func paneOOMCheck(t *testing.T, host string) {
 	}
 }
 
+// terminfoChecks log in as the agent with the TERM names Ghostty (and
+// cmux) and kitty send over ssh: tmux starts in a terminal script(1)
+// provides and tput moves the cursor, while a name with no entry still
+// fails as tmux does. Every account reads the entries (ADR 0093).
+func terminfoChecks(t *testing.T, host string) {
+	t.Helper()
+	must(t, host, "agent", "stat -c '%n %a %U' /etc/terminfo/x /etc/terminfo/x/xterm-ghostty /usr/share/terminfo/x/xterm-kitty",
+		"/etc/terminfo/x 755 root", "/etc/terminfo/x/xterm-ghostty 644 root", "/usr/share/terminfo/x/xterm-kitty 644 root")
+	probe := func(term string) (string, error) {
+		return sshRun(t, host, "agent", nil, "export TERM="+term+"; tput cup 0 0 >/dev/null && script -qec 'tmux -L kb-term new-session true' /dev/null </dev/null")
+	}
+	ok := true
+	for _, term := range []string{"xterm-ghostty", "xterm-kitty"} {
+		if out, err := probe(term); err != nil {
+			ok = false
+			t.Errorf("TERM=%s: tmux or tput failed for the agent: %v\n%s", term, err, out)
+		}
+	}
+	if out, err := probe("xterm-kb-none"); err == nil {
+		ok = false
+		t.Errorf("a TERM with no entry worked too, so the check proves nothing:\n%s", out)
+	}
+	if !ok {
+		return
+	}
+	logf(t, "PASS over ssh with TERM xterm-ghostty and xterm-kitty, the agent's tmux starts and tput works; the entries are readable by every account")
+}
+
 // statusLineChecks read the status line of the agent's session from the
 // running tmux server (the one the watch run brought back, so it started
 // with this keelbox's config): the box's name on the left, how to leave on
@@ -559,6 +587,7 @@ func sessionChecks(t *testing.T, host, box, cfg string) {
 	must(t, host, "agent", "tmux show-environment -g PATH", "/.local/share/mise/shims:", "/.local/bin")
 	logf(t, "PASS the tmux server keeps the agent's own PATH")
 	statusLineChecks(t, host, box)
+	terminfoChecks(t, host)
 	paneOOMCheck(t, host)
 	welcomeChecks(t, host, box)
 	if out, err := kb(t, "login", cfg); err == nil || !strings.Contains(out, "needs a terminal") {
