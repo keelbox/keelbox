@@ -174,7 +174,7 @@ func CheckRootPath(p string, lstat func(string) (FileInfo, error)) error {
 		switch {
 		case !st.IsDir:
 			return &UnsafePathError{Path: p, Dir: dir, Why: "is not a directory"}
-		case st.Owner != "root":
+		case st.Owner != "root" && (st.Owner != "nobody" || !kernelDir(dir)):
 			return &UnsafePathError{Path: p, Dir: dir, Why: "is owned by " + st.Owner}
 		case st.Mode&0o022 != 0:
 			return &UnsafePathError{Path: p, Dir: dir, Why: fmt.Sprintf("is writable by group or others (mode %o)", st.Mode)}
@@ -222,6 +222,21 @@ func CheckRootPath(p string, lstat func(string) (FileInfo, error)) error {
 		dir = next
 	}
 	return nil
+}
+
+// kernelDir: a directory of /proc or /sys, which the kernel lays out and no
+// account can create, rename or replace. In an unprivileged container (LXC,
+// LXD, Proxmox) they belong to the host's root, which the container sees as
+// the overflow user, nobody. The cgroup tree is left out: systemd delegates
+// parts of it to accounts, which can make directories there.
+func kernelDir(dir string) bool {
+	switch {
+	case dir == "/proc" || strings.HasPrefix(dir, "/proc/"):
+		return true
+	case dir == "/sys/fs/cgroup" || strings.HasPrefix(dir, "/sys/fs/cgroup/"):
+		return false
+	}
+	return dir == "/sys" || strings.HasPrefix(dir, "/sys/")
 }
 
 // components splits a path into its names, dropping empty and "." parts.

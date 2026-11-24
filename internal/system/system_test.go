@@ -54,6 +54,46 @@ func TestCheckRootPath(t *testing.T) {
 
 // The real lstat feeds the same check: a directory this test owns is
 // refused, a system directory is not.
+// In an unprivileged container /proc and /sys belong to the host's root,
+// which the container sees as nobody. Only those kernel trees get that
+// allowance: nobody's directory anywhere else, a writable one, or one in
+// the cgroup tree, which systemd delegates to accounts, is still refused.
+func TestCheckRootPathInAnUnprivilegedContainer(t *testing.T) {
+	f := NewFake()
+	dir := func(p string, mode fs.FileMode, owner string) {
+		f.Files[p] = &FakeFile{Dir: true, Mode: mode, Owner: owner, Group: owner}
+	}
+	dir("/proc", 0o555, "nobody")
+	dir("/proc/sys", 0o555, "nobody")
+	dir("/proc/sys/kernel", 0o555, "nobody")
+	dir("/proc/1", 0o555, "root")
+	f.Files["/proc/self"] = &FakeFile{Target: "1", Owner: "root"}
+	dir("/sys", 0o555, "nobody")
+	dir("/sys/fs", 0o755, "nobody")
+	dir("/sys/fs/cgroup", 0o755, "nobody")
+	dir("/sys/fs/cgroup/user.slice", 0o755, "nobody")
+	dir("/sys/kernel", 0o755, "nobody")
+	dir("/sys/kernel/open", 0o777, "nobody")
+	dir("/srv", 0o755, "nobody")
+	dir("/proc/2", 0o755, "agent")
+
+	for p, unsafe := range map[string]bool{
+		"/proc/sys/kernel/apparmor_restrict_unprivileged_userns": false,
+		"/proc/self/exe":              false,
+		"/sys/kernel/mm":              false,
+		"/sys/fs/cgroup/user.slice/x": true, // delegated to accounts
+		"/sys/kernel/open/x":          true, // writable by others
+		"/srv/x":                      true, // nobody outside /proc and /sys
+		"/proc/2/x":                   true, // another account's
+	} {
+		err := CheckRootPath(p, f.lstat)
+		var u *UnsafePathError
+		if got := errors.As(err, &u); got != unsafe {
+			t.Errorf("%s: unsafe=%v, want %v (%v)", p, got, unsafe, err)
+		}
+	}
+}
+
 func TestCheckRootPathOnThisMachine(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: the temp dir is root's")
