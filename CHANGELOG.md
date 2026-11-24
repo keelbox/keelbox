@@ -14,7 +14,7 @@
 * **cli:** self-update leaves a distribution package to its package manager ([#6](https://github.com/keelbox/keelbox/issues/6)) ([ef26656](https://github.com/keelbox/keelbox/commit/ef26656a5c2055ca592f8715bbde7c54018bf34e))
 * **system:** set up unprivileged LXC, LXD and Proxmox containers ([#7](https://github.com/keelbox/keelbox/issues/7)) ([fba0a88](https://github.com/keelbox/keelbox/commit/fba0a888cad074d5450dacb124e51f98950a22eb))
 
-## 0.1.0 (2026-11-21)
+## 0.1.0 (2026-11-22)
 
 The first public release of keelbox. It turns an Ubuntu machine into a box for AI coding agents such as Claude Code and Codex: a machine at home, a VPS, or a server it creates for you on Hetzner, AWS, DigitalOcean or Google Cloud.
 
