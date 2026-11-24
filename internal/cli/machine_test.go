@@ -3,6 +3,8 @@ package cli
 import (
 	"errors"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -203,8 +205,31 @@ func TestAdminConfirmedIsOneLine(t *testing.T) {
 // attach starts the session's own shell: the box's welcome is printed by
 // that shell, once, and attach adds no line of its own beside it.
 func TestAttachLeavesTheWelcomeToTheBox(t *testing.T) {
-	if got := attachCommand("main"); got != "tmux new-session -A -s main" {
+	if got := attachCommand("main"); got != "infocmp >/dev/null 2>&1 || export TERM=xterm-256color; tmux new-session -A -s main" {
 		t.Errorf("%s", got)
+	}
+}
+
+// A terminal the box has no terminfo entry for still gets a session: the
+// command falls back to xterm-256color, and keeps a TERM the box knows.
+func TestAttachFallsBackForAnUnknownTerminal(t *testing.T) {
+	if _, err := exec.LookPath("infocmp"); err != nil {
+		t.Skip("no infocmp here")
+	}
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\necho \"$TERM\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for term, want := range map[string]string{"xterm-keelbox-unknown": "xterm-256color", "xterm": "xterm"} {
+		c := exec.Command("sh", "-c", attachCommand("main"))
+		c.Env = []string{"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"), "TERM=" + term, "TERMINFO_DIRS=", "HOME=" + t.TempDir()}
+		out, err := c.Output()
+		if err != nil {
+			t.Fatalf("TERM=%s: %v", term, err)
+		}
+		if got := strings.TrimSpace(string(out)); got != want {
+			t.Errorf("TERM=%s: session got TERM=%s, want %s", term, got, want)
+		}
 	}
 }
 

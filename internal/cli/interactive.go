@@ -954,8 +954,13 @@ func sessionCutOff(ctx context.Context, failure, err error, s *provider.SSH, box
 // attachCommand opens the session, or creates it. What to do first is the
 // box's to say, in whatever way the session came to be: its status line,
 // and the welcome in a new session's first pane (modules.SessionWelcome).
+// ssh hands the box the laptop's TERM. When the box has no terminfo entry
+// for it (Ghostty's xterm-ghostty on Ubuntu 24.04, say), tmux stops with
+// "missing or unsuitable terminal", so the session gets xterm-256color,
+// which those terminals also speak. infocmp is in ncurses-bin, which every
+// Ubuntu has.
 func attachCommand(session string) string {
-	return "tmux new-session -A -s " + session
+	return "infocmp >/dev/null 2>&1 || export TERM=xterm-256color; tmux new-session -A -s " + session
 }
 
 // cmdShell opens a login shell as the agent, or the admin with --admin.
