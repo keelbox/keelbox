@@ -187,7 +187,7 @@ func (w *wizard) connectFix(err error) error {
 		return fmt.Errorf("%w. Run it as that account: %s", err, w.upCommand(map[string]string{"ssh-user": acct.want}))
 	case errors.As(err, &hk) && hk.Want != "":
 		// A key that is not the one asked for is not offered as the answer.
-		return fmt.Errorf("%s does not offer the host key %s given for it (it offers %s), so keelbox did not connect. Read the server's key in %s, and pass that one: %s",
+		return fmt.Errorf("%s does not offer the host key %s given for it; it offers %s. keelbox did not connect. Read the server's key in %s, and pass that one: %s",
 			hk.Host, hk.Want, hk.Fingerprints(), compare, w.upCommand(map[string]string{"host-key": hostKeyPlaceholder}))
 	case errors.As(err, &hk):
 		// What it offers is listed, not filled in: nobody has compared it

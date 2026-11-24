@@ -67,7 +67,7 @@ func TestChooseNeverTrustsSilently(t *testing.T) {
 	var hk *HostKeyError
 	if _, err := s.choose(offered); err == nil || !strings.Contains(err.Error(), fp) {
 		t.Errorf("no terminal, no pin: %v", err)
-	} else if !errors.As(err, &hk) || hk.Host != "box" || hk.Want != "" || hk.Fingerprints() != "ssh-ed25519 "+fp {
+	} else if !errors.As(err, &hk) || hk.Host != "box" || hk.Want != "" || hk.Fingerprints() != fp+" (ssh-ed25519)" {
 		t.Errorf("no terminal, no pin: not a host key error a caller can word itself: %+v", hk)
 	}
 	s.HostKey = fp
@@ -75,10 +75,14 @@ func TestChooseNeverTrustsSilently(t *testing.T) {
 		t.Errorf("pinned: %v %v", keys, err)
 	}
 	s.HostKey = "SHA256:" + strings.Repeat("A", 43)
-	if _, err := s.choose(offered); err == nil || !strings.Contains(err.Error(), "refusing") {
+	_, err := s.choose(offered)
+	if err == nil || !strings.Contains(err.Error(), "Refusing") {
 		t.Errorf("wrong pin accepted: %v", err)
 	} else if !errors.As(err, &hk) || hk.Want != s.HostKey || len(hk.Offered) != 1 {
 		t.Errorf("wrong pin: the error does not carry what was asked for and offered: %+v", hk)
+	}
+	if hk != nil && (hk.Fingerprints() != fp+" (ssh-ed25519)" || !strings.Contains(err.Error(), "it offers "+fp+" (ssh-ed25519).")) {
+		t.Errorf("wrong pin: offered keys not listed fingerprint first: %v", err)
 	}
 	s.HostKey = ""
 	var asked []HostKey
