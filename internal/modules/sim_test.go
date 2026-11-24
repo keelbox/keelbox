@@ -61,6 +61,10 @@ type sim struct {
 	// localAddrs are the box's own addresses besides loopback and the
 	// tailnet's: what ip route get calls local.
 	localAddrs []string
+	// terminfo is the compiled entries in /etc/terminfo: name -> names line.
+	// noGhostty is a release whose ncurses-term lacks ghostty (24.04).
+	terminfo  map[string]string
+	noGhostty bool
 	// nftLoaded is the agent table as the kernel has it: the rules file as
 	// it was when keelbox-agent-net.service last started.
 	nftLoaded string
@@ -201,6 +205,20 @@ func res(out string) (system.Result, error) { return system.Result{Stdout: out},
 func failed(c system.Cmd) (system.Result, error) {
 	r := system.Result{ExitCode: 1}
 	return r, &system.ExitError{Cmd: c, Result: r}
+}
+
+// terminfoBase reports whether the distribution has an entry: ncurses-base
+// has xterm-256color, and ncurses-term the terminals' own.
+func (s *sim) terminfoBase(name string) bool {
+	switch name {
+	case "xterm-256color":
+		return true
+	case "kitty":
+		return s.pkgs["ncurses-term"] != ""
+	case "ghostty":
+		return s.pkgs["ncurses-term"] != "" && !s.noGhostty
+	}
+	return false
 }
 
 func (s *sim) userGroups(u string) []string {
@@ -388,6 +406,33 @@ func (s *sim) run(c system.Cmd) (system.Result, error) {
 	case "chmod":
 		if m, err := strconv.ParseUint(arg(0), 8, 32); err == nil && s.has(arg(1)) {
 			s.Files[arg(1)].Mode = fs.FileMode(m)
+		}
+		return res("")
+	case "infocmp":
+		name := a[len(a)-1]
+		if line, ok := s.terminfo[name]; ok {
+			return res("#\tReconstructed via infocmp from file: /etc/terminfo/x/" + name + "\n" + line + "\n\tam,\n")
+		}
+		if !s.terminfoBase(name) {
+			return failed(c)
+		}
+		return res(name + "|" + name + ",\n\tam,\n")
+	case "tic":
+		if s.terminfo == nil {
+			s.terminfo = map[string]string{}
+		}
+		var names string
+		for _, l := range strings.Split(string(c.Stdin), "\n") {
+			switch t := strings.TrimSpace(l); {
+			case strings.HasPrefix(t, "use="):
+				if !s.terminfoBase(strings.TrimSuffix(strings.TrimPrefix(t, "use="), ",")) {
+					return failed(c)
+				}
+				name, _, _ := strings.Cut(names, "|")
+				s.terminfo[name] = names
+			case t != "":
+				names = t
+			}
 		}
 		return res("")
 	case "tmux":

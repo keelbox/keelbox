@@ -81,6 +81,7 @@ func (h Host) Steps(e *engine.Env) []engine.Step {
 			return append(append([]string(nil), BasePackages...), e.Cfg.Host.Packages...)
 		}),
 		bwrapProfileStep(),
+		terminfoStep(),
 		hostnameStep(c.Host.Hostname),
 		timezoneStep(c.Host.Timezone),
 	}
