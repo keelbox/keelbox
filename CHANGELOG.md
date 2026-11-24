@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.1](https://github.com/keelbox/keelbox/compare/v0.1.0...v0.1.1) (2026-11-24)
+
+
+### Features
+
+* **installer:** clearer, shorter install output ([#3](https://github.com/keelbox/keelbox/issues/3)) ([b623ecf](https://github.com/keelbox/keelbox/commit/b623ecfb310eb0d71f128d7269df2dd806f04240))
+
+
+### Bug Fixes
+
+* **cli:** attach falls back to xterm-256color for a terminal the box does not know ([#5](https://github.com/keelbox/keelbox/issues/5)) ([dfe8e9d](https://github.com/keelbox/keelbox/commit/dfe8e9d24a8263803884cee7c0df62fb2fcddeb9))
+* **cli:** self-update leaves a distribution package to its package manager ([#6](https://github.com/keelbox/keelbox/issues/6)) ([ef26656](https://github.com/keelbox/keelbox/commit/ef26656a5c2055ca592f8715bbde7c54018bf34e))
+* **system:** set up unprivileged LXC, LXD and Proxmox containers ([#7](https://github.com/keelbox/keelbox/issues/7)) ([fba0a88](https://github.com/keelbox/keelbox/commit/fba0a888cad074d5450dacb124e51f98950a22eb))
+
 ## 0.1.0 (2026-11-21)
 
 The first public release of keelbox. It turns an Ubuntu machine into a box for AI coding agents such as Claude Code and Codex: a machine at home, a VPS, or a server it creates for you on Hetzner, AWS, DigitalOcean or Google Cloud.
