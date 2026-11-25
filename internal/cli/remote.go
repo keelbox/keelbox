@@ -302,7 +302,7 @@ func sshFailure(ctx context.Context, err error, cfg *config.Config, s *provider.
 	}
 	var hk *provider.HostKeyError
 	if errors.As(err, &hk) {
-		return hostKeyFix(hk, cfg, o, cmd)
+		return hostKeyFix(hk, cfg.Box, o.configFile)
 	}
 	if !sshFailed(err, s) {
 		return err
@@ -382,20 +382,23 @@ func forLaptop(o options) bool {
 	return o.local && o.configFile == provider.RemoteConfig
 }
 
-// hostKeyFix ends a refused host key with where to set the key and the
-// command to run again. As in connectFix, the fingerprint is not filled in
-// from what the server offers: comparing it is the user's step.
-func hostKeyFix(hk *provider.HostKeyError, cfg *config.Config, o options, cmd string) error {
-	path := o.configFile
-	if path == "" {
-		path = boxConfigPath(cfg.Box)
+// hostKeyFix ends a refused host key with where to set the key and a
+// command that shows the pin works: keelbox status, which changes nothing,
+// rather than the command that failed, whose arguments may not be known
+// here. As in connectFix, the fingerprint is not filled in from what the
+// server offers: comparing it is the user's step. configFile is the config
+// the command was given, "" for the box's own in the registry.
+func hostKeyFix(hk *provider.HostKeyError, box, configFile string) error {
+	path, ref := boxConfigPath(box), box
+	if configFile != "" {
+		path, ref = configFile, boxRef(&config.Config{Box: box}, configFile)
 	}
 	why := fmt.Sprintf("%s is not a host keelbox has connected to, and no terminal is attached to confirm its host key. It offers %s.", hk.Host, hk.Fingerprints())
 	if hk.Want != "" {
 		why = fmt.Sprintf("%s does not offer the host key %s that target.ssh.host_key pins; it offers %s. keelbox did not connect; if the server was reinstalled, that is expected.", hk.Host, hk.Want, hk.Fingerprints())
 	}
-	return &hostKeyFixed{hk: hk, msg: fmt.Sprintf("%s Read the server's key in %s. In %s, under target.ssh, set host_key: %s to that key. Then run: keelbox %s %s",
-		why, compareHostKey, tildePath(path), hostKeyPlaceholder, cmd, boxRef(cfg, o.configFile))}
+	return &hostKeyFixed{hk: hk, msg: fmt.Sprintf("%s Read the server's key in %s. In %s, under target.ssh, set host_key: %s to that key. Then check keelbox connects: keelbox status %s",
+		why, compareHostKey, tildePath(path), hostKeyPlaceholder, ref)}
 }
 
 // hostKeyFixed is a refused host key with its fix; it unwraps to the

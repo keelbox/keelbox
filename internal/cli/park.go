@@ -209,6 +209,10 @@ func waitForBox(ctx context.Context, cfg *config.Config, public addr, stdout, st
 	}
 	s := sshTarget(cfg, a, options{}, stdout, stderr)
 	if err := s.TrustHost(ctx); err != nil {
+		var hk *provider.HostKeyError
+		if errors.As(err, &hk) {
+			return hostKeyFix(hk, cfg.Box, "")
+		}
 		return err
 	}
 	if err := s.WaitReachable(ctx, 3*time.Minute); err != nil {
