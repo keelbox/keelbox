@@ -593,6 +593,7 @@ Flags:
   --adopt            accept what plan --impact marks on a machine in use, such as replacing Ubuntu's
                      docker.io
   --allow-downgrade  move this computer and the box to an older release
+  --remove-keys      take off SSH keys this config no longer lists
 ```
 <!-- keelbox update --help: end -->
 
@@ -1109,7 +1110,7 @@ Every flag except those only `up` takes, which are in [its help](#up).
 | `--binary PATH` | remote commands | The Linux keelbox to upload. Default: this executable if it fits the box, `keelbox-linux-<arch>` beside it, the cache, then a verified download of this version ([releases](release.md#the-binary-uploaded-to-the-box)). |
 | `--verbose` | `up`, `plan`, `apply`, `update`, `doctor`, `add`, `create`, `resize`, `park`, `resume`, `rollback` | One line for every step and every command run on the box. |
 | `--allow-downgrade` | `apply`, `update`, `self-update` | Move the box, or this binary, to an older release. |
-| `--remove-keys` | `apply` | Take off SSH keys the config dropped. |
+| `--remove-keys` | `apply`, `update` | Take off SSH keys the config dropped. |
 | `--adopt` | `apply`, `update`, `up`, `create` | Accept what `plan --impact` marks on a machine in use. It also lets keelbox remove `docker.io`, `docker-compose`, `docker-compose-v2`, `podman-docker`, `containerd` and `runc`, which stops their containers. |
 | `--impact` | `plan` | What apply would change on a machine in use. |
 | `--json` | `plan --impact`, `status`, `ls`, `sessions` | JSON output. |

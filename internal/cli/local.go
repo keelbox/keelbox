@@ -131,10 +131,24 @@ func runLocal(ctx context.Context, cmd string, cfg *config.Config, o options, st
 		if !firstApplyGate(ctx, env, modules.All(), stderr) {
 			return 1
 		}
+		// Every key this apply may put on the box is in root's record
+		// before any step runs, so an apply that stops partway cannot let
+		// the next one take a key off unasked (ADR 0097).
+		if err := recordKeys(env, true); err != nil {
+			fail(stderr, fmt.Errorf("recording the SSH keys before the apply: %w", err))
+			return 1
+		}
 		out, errOut, done := applyView(resolved, o, stdout, stderr)
 		defer done()
 		env.Log = out
-		return Apply(ctx, env, modules.All(), from, out, errOut)
+		code := Apply(ctx, env, modules.All(), from, out, errOut)
+		if code == 0 {
+			if err := recordKeys(env, false); err != nil {
+				fail(stderr, fmt.Errorf("recording the SSH keys after the apply: %w", err))
+				return 1
+			}
+		}
+		return code
 	case "doctor":
 		return Doctor(ctx, env, modules.All(), stdout)
 	case "status":

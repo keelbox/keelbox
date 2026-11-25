@@ -63,7 +63,7 @@ Put your settings in `~/.tmux.conf` after its `source-file` line, which loads ke
 A second computer needs the box's config, its own SSH key on the box, and a way to reach the box.
 
 1. On the first computer, add the second computer's public key, the line in its `~/.ssh/id_ed25519.pub`, under `ssh_authorized_keys` for both accounts in `~/.config/keelbox/boxes/acme.yaml`, then run `keelbox apply acme`.
-2. Copy that config to the same path on the second computer. Leave `ssh_authorized_key_files` out of it, or list both keys as lines: a file path is read on each computer, so it names another key there.
+2. Copy that config to the same path on the second computer. Leave `ssh_authorized_key_files` out of it, or list both keys as lines: a file path is read on each computer, so it names another key there. If it sets `target.ssh.identity_file`, point that at the second computer's private key.
 3. Join the second computer to your tailnet if public SSH has closed. The first connection shows the box's host key; compare it with `ssh-keygen -lf ~/.config/keelbox/known_hosts` on the first computer.
 
 If an apply from either computer would take off a key the last apply put there, it stops and prints the lines that keep it: [apply would take SSH keys off](troubleshooting.md#apply-would-take-ssh-keys-off).

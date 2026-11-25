@@ -64,7 +64,8 @@ func TestKeysGateSecondComputer(t *testing.T) {
 	}
 	got := stderr.String()
 	for _, want := range []string{
-		"this apply would take 2 SSH keys off acme that its last apply put there. Nothing has changed.",
+		"this apply would take 2 SSH keys off acme that an apply put there. Nothing has changed.",
+		"If they belonged to a computer you no longer use: keelbox apply acme --remove-keys\nTo keep them, add these lines",
 		"  users.admin: ssh-ed25519 SHA256:",
 		" laptop-a\n  users.agent: ssh-ed25519 SHA256:",
 		"  users:\n    admin:\n      ssh_authorized_keys:\n        - \"" + laptopA + "\"\n    agent:\n      ssh_authorized_keys:\n        - \"" + laptopA + "\"\n",
@@ -73,7 +74,7 @@ func TestKeysGateSecondComputer(t *testing.T) {
 			t.Errorf("message lacks %q:\n%s", want, got)
 		}
 	}
-	if !strings.HasSuffix(got, "To take it off the box: keelbox apply acme --remove-keys\n") {
+	if !strings.HasSuffix(got, "\nThen: keelbox apply acme\n") {
 		t.Errorf("message does not end with the fix:\n%s", got)
 	}
 	for _, c := range x.Calls {
@@ -99,9 +100,7 @@ func TestKeysGateSecondComputer(t *testing.T) {
 }
 
 // A first apply, the same keys with other comments, an added key, and a
-// last config keelbox cannot read take nothing off. Keys the accounts
-// added to their own authorized_keys do not count: only root's record of
-// the last apply does.
+// last config keelbox cannot read take nothing off.
 func TestKeysGateTakesNothingOff(t *testing.T) {
 	cfg := func(keys ...string) *config.Config {
 		c := &config.Config{Box: "acme"}
@@ -129,11 +128,68 @@ func TestKeysGateTakesNothingOff(t *testing.T) {
 			if tc.raw != "" {
 				x.AddFile(modules.ConfigPath, tc.raw, 0o600)
 			}
-			x.AddFile("/home/agent/.ssh/authorized_keys", laptopB+"\n", 0o600)
 			var stderr bytes.Buffer
 			if !keysGate(&engine.Env{X: x, Cfg: tc.now}, false, &stderr) {
 				t.Errorf("stopped:\n%s", stderr.String())
 			}
 		})
+	}
+}
+
+// An apply that stops partway, after authorized_keys changed, leaves every
+// key it may have put there in root's record: the next apply, from the
+// other computer, stops before taking one off. One that passes records its
+// keys alone, so --remove-keys takes a key off for good.
+func TestKeysRecordAcrossApplies(t *testing.T) {
+	cfg := func(keys ...string) *config.Config {
+		c := &config.Config{Box: "acme"}
+		c.Users.Admin.SSHAuthorizedKeys = keys
+		c.Users.Agent.SSHAuthorizedKeys = keys
+		return c
+	}
+	x := system.NewFake()
+	lastApplied(t, x, laptopA) // a box set up before the record existed
+	var stderr bytes.Buffer
+
+	// B applies A and B; the apply fails after Host: no record after it.
+	e := &engine.Env{X: x, Cfg: cfg(laptopA, laptopB)}
+	if !keysGate(e, false, &stderr) {
+		t.Fatalf("adding a key stopped:\n%s", stderr.String())
+	}
+	if err := recordKeys(e, true); err != nil {
+		t.Fatal(err)
+	}
+	// A applies its config with A alone: B would come off.
+	e = &engine.Env{X: x, Cfg: cfg(laptopA)}
+	if keysGate(e, false, &stderr) || !strings.Contains(stderr.String(), "take 2 SSH keys off") || !strings.Contains(stderr.String(), "laptop-b") {
+		t.Fatalf("an apply after a partial one took the key off unasked:\n%s", stderr.String())
+	}
+	// With --remove-keys the apply goes ahead, passes, and records A alone.
+	stderr.Reset()
+	if !keysGate(e, true, &stderr) {
+		t.Fatal("--remove-keys stopped")
+	}
+	if err := recordKeys(e, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordKeys(e, false); err != nil {
+		t.Fatal(err)
+	}
+	if !keysGate(e, false, &stderr) {
+		t.Errorf("the key taken off still stops apply:\n%s", stderr.String())
+	}
+	data, _ := x.ReadFile(KeysRecord)
+	if strings.Contains(string(data), "laptop-b") || strings.Count(string(data), "laptop-a") != 2 {
+		t.Errorf("record:\n%s", data)
+	}
+	if fi, ok := x.Files[KeysRecord]; ok && (fi.Mode != 0o600 || fi.Owner != "root") {
+		t.Errorf("record is %o %s", fi.Mode, fi.Owner)
+	}
+}
+
+// --remove-keys reaches the box, and the detached run started there.
+func TestRemoveKeysReachesTheBox(t *testing.T) {
+	if got := strings.Join(remoteExtra(options{removeKeys: true}), " "); !strings.Contains(got, "--remove-keys") {
+		t.Errorf("remote arguments %q", got)
 	}
 }

@@ -990,6 +990,8 @@ func manualPermissionsChecks(t *testing.T, host, box, cfg string) {
 // keysChecks applies the box's config as a second computer would: its
 // ssh_authorized_key_files names a file that holds another key there. The
 // apply stops before any change, and both accounts keep the first key.
+// Only the agent's key file changes, so the admin, which the harness
+// logs in as, keeps its key even if the check ever failed to stop.
 // With both keys listed it adds the second; --remove-keys takes the
 // second off again, and the first stays (ADR 0097).
 func keysChecks(t *testing.T, host, cfg string) {
@@ -1008,7 +1010,14 @@ func keysChecks(t *testing.T, host, cfg string) {
 	defer os.Remove(other)
 	write := func(files string) {
 		t.Helper()
-		s := strings.ReplaceAll(string(data), "ssh_authorized_key_files: ["+keyPath+".pub]", "ssh_authorized_key_files: ["+files+"]")
+		admin, agent, ok := strings.Cut(string(data), "\n  agent:\n")
+		if !ok {
+			t.Fatalf("no agent in the config:\n%s", data)
+		}
+		s := admin + "\n  agent:\n" + strings.Replace(agent, "ssh_authorized_key_files: ["+keyPath+".pub]", "ssh_authorized_key_files: ["+files+"]", 1)
+		if s == string(data) {
+			t.Fatalf("the agent's key file is not in the config:\n%s", data)
+		}
 		if err := os.WriteFile(other, []byte(s), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -1025,7 +1034,7 @@ func keysChecks(t *testing.T, host, cfg string) {
 
 	write(second + ".pub")
 	out, err := kb(t, "apply", other)
-	if err == nil || !strings.Contains(out, "this apply would take 2 SSH keys off") || !strings.Contains(out, "--remove-keys") {
+	if err == nil || !strings.Contains(out, "this apply would take 1 SSH key off") || !strings.Contains(out, "--remove-keys") {
 		t.Fatalf("an apply from a second computer did not stop: %v\n%s", err, out)
 	}
 	if got := keys(); strings.Count(got, firstKey) != 2 || strings.Contains(got, "kb-e2e-second") {
@@ -1037,8 +1046,8 @@ func keysChecks(t *testing.T, host, cfg string) {
 	if out, err := kb(t, "apply", other); err != nil {
 		t.Fatalf("apply with both keys: %v\n%s", err, out)
 	}
-	if got := keys(); strings.Count(got, "kb-e2e-second") != 2 {
-		t.Fatalf("the second key was not added:\n%s", got)
+	if got := keys(); strings.Count(got, "kb-e2e-second") != 1 {
+		t.Fatalf("the second key was not added to the agent:\n%s", got)
 	}
 	if out, err := kb(t, "apply", cfg, "--remove-keys"); err != nil {
 		t.Fatalf("apply --remove-keys: %v\n%s", err, out)
