@@ -180,6 +180,23 @@ func ResizeOffers(types []ServerType, s *Server, location string) []Offer {
 	return out
 }
 
+// MonthlyIn is what Create would order for a type in a location: whether
+// it is orderable there (AvailableIn, Create's own check, deprecated or
+// not), and its gross monthly price, with priced false where Hetzner's
+// list gives none that reads.
+func (t ServerType) MonthlyIn(location string) (monthly float64, orderable, priced bool) {
+	if !t.AvailableIn(location) {
+		return 0, false, false
+	}
+	for _, p := range t.Prices {
+		if p.Location == location {
+			v, err := strconv.ParseFloat(p.PriceMonthly.Gross, 64)
+			return v, true, err == nil && v > 0
+		}
+	}
+	return 0, true, false
+}
+
 func offerIn(t ServerType, location string) Offer {
 	o := Offer{Type: t}
 	for _, p := range t.Prices {

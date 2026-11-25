@@ -680,8 +680,10 @@ func (w *wizard) offerUnfinished() (name string, stop bool, code int, err error)
 	return "", true, cmdForget(o, []string{box}, w.p, w.out, w.errOut), nil
 }
 
-// lockBox keeps a second keelbox up on the same box from running at once.
-func lockBox(box string) (func(), error) {
+// lockBox keeps a second keelbox up, or a keelbox create, on the same box
+// from running at once; again is the command to run once the other is
+// done.
+func lockBox(box, again string) (func(), error) {
 	if err := os.MkdirAll(boxesDir(), 0o700); err != nil {
 		return nil, err
 	}
@@ -692,7 +694,7 @@ func lockBox(box string) (func(), error) {
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		f.Close()
-		return nil, fmt.Errorf("another keelbox up is working on %s; wait for it to finish, then run keelbox up %s again", box, box)
+		return nil, fmt.Errorf("another keelbox command is working on %s; nothing changed. Wait for it to finish, then: %s", box, again)
 	}
 	return func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN); f.Close() }, nil
 }

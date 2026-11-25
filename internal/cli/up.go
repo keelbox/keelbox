@@ -115,18 +115,23 @@ type wizard struct {
 	out, errOut io.Writer
 	start       time.Time
 	bannered    bool // the banner is on the screen
-	fresh       bool // configured in this run
-	progressed  bool // a stage was completed in this run
-	changing    bool // past the questions: a stage that changes things has started
-	box         string
-	st          ui.Style
-	draft       *upDraft        // the answers so far, on a terminal (updraft.go)
-	drafted     map[string]bool // flags set from the draft, not the command line
-	via         string          // where the box runs, once known: for the step indicator
-	stepAt      string          // the step shown last
-	refused     *cloudRefusal   // the cloud's refusal of the server create asked for
-	moving      string          // while a box moves to another cloud: the one it was on
-	next        string          // the command that continues, when not keelbox up BOX
+	// locked is the box this run holds the lock of (lockBox), from the
+	// first check that a move or a create depends on to the end of the
+	// run; unlock releases it.
+	locked     string
+	unlock     func()
+	fresh      bool // configured in this run
+	progressed bool // a stage was completed in this run
+	changing   bool // past the questions: a stage that changes things has started
+	box        string
+	st         ui.Style
+	draft      *upDraft        // the answers so far, on a terminal (updraft.go)
+	drafted    map[string]bool // flags set from the draft, not the command line
+	via        string          // where the box runs, once known: for the step indicator
+	stepAt     string          // the step shown last
+	refused    *cloudRefusal   // the cloud's refusal of the server create asked for
+	moving     string          // while a box moves to another cloud: the one it was on
+	next       string          // the command that continues, when not keelbox up BOX
 }
 
 // banner opens keelbox up on a terminal, once, when it has its first
@@ -233,6 +238,22 @@ func (w *wizard) needFlag(what, flag, example string) error {
 	return fmt.Errorf("%s: no terminal to ask on; pass %s, for example: %s", what, flag, example)
 }
 
+// lock takes box's lock for the rest of the run, unless the run holds it.
+func (w *wizard) lock(box string) error {
+	if w.locked == box {
+		return nil
+	}
+	unlock, err := lockBox(box, "keelbox up "+box)
+	if err != nil {
+		return err
+	}
+	if w.unlock != nil {
+		w.unlock()
+	}
+	w.locked, w.unlock = box, unlock
+	return nil
+}
+
 // rerun is the command that runs up for box again once the user has done
 // what an error asks: during a move to another cloud, the move with the
 // flags it was given.
@@ -326,6 +347,11 @@ func (w *wizard) upCommand(change map[string]string) string {
 func cmdUp(ctx context.Context, o options, pos []string, p *prompt.Prompter, run upRunner, stdout, stderr io.Writer) int {
 	w := &wizard{p: p.OnInterrupt(ctx.Done()), o: o, run: run, out: stdout, errOut: stderr, start: time.Now(), st: o.style}
 	defer asInvoker()()
+	defer func() {
+		if w.unlock != nil {
+			w.unlock()
+		}
+	}()
 	stopSaid.Store(true) // up says what a Ctrl-C at one of its questions means
 	setInterruptNote("") // while asking, Ctrl-C ends the question; nothing has changed
 	code, err := w.up(ctx, pos)
@@ -1906,11 +1932,9 @@ func (w *wizard) showCloudConfig(box string) error {
 // resume runs the stages a box has not completed.
 func (w *wizard) resume(ctx context.Context, cfg *config.Config, st upState) (int, error) {
 	box := st.boxName(cfg)
-	unlock, err := lockBox(box)
-	if err != nil {
+	if err := w.lock(box); err != nil {
 		return 1, err
 	}
-	defer unlock()
 	w.banner()
 	// From here on things change: Ctrl-C lets the current step finish.
 	w.changing = true

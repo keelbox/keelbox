@@ -12,6 +12,7 @@ import (
 
 	"github.com/keelbox/keelbox/internal/config"
 	"github.com/keelbox/keelbox/internal/prompt"
+	"github.com/keelbox/keelbox/internal/provider"
 	"github.com/keelbox/keelbox/internal/provider/hetzner"
 	"github.com/keelbox/keelbox/internal/provider/hetzner/hetznertest"
 )
@@ -101,7 +102,7 @@ func TestUpHetznerRefusedWithoutATerminal(t *testing.T) {
 		"Hetzner refused to create acme's server, cx23 in fsn1 (" + forbiddenText + ")",
 		"Hetzner may be limiting new servers for this account or in fsn1 (status.hetzner.com)",
 		"No server was created, and keelbox deleted the firewall it had made for it",
-		"Try another location (ash at EUR 5.49/month): keelbox up acme --location ash; another size in fsn1 (cpx22 at EUR 7.49/month, ccx13 at EUR 14.49/month, cpx02 at EUR 5.99/month): keelbox up acme --size cpx22; " +
+		"Try another location (ash at EUR 5.49/month): keelbox up acme --location ash --yes; another size in fsn1 (cpx22 at EUR 7.49/month, ccx13 at EUR 14.49/month, cpx02 at EUR 5.99/month): keelbox up acme --size cpx22 --yes; " +
 			"another cloud, with your other answers kept: " + moveCmds + "; or the same again later: keelbox up acme",
 	} {
 		if !strings.Contains(text, want) {
@@ -150,9 +151,6 @@ func TestUpHetznerRefusedWithoutATerminal(t *testing.T) {
 // Another size, as printed.
 func TestUpRefusedSizeAsPrinted(t *testing.T) {
 	r, _ := refusedBox(t, forbidden)
-	if code, out := upWith(t, r, nil, "up", "acme", "--size", "cpx22"); code != 2 || !strings.HasSuffix(strings.TrimSpace(flat(out)), "keelbox up acme --size cpx22 --yes") {
-		t.Fatalf("exit %d\n%s", code, out)
-	}
 	code, out := upWith(t, r, nil, "up", "acme", "--size", "cpx22", "--yes")
 	cfg, _ := loadBox(t, "acme")
 	if code != 0 || cfg.Target.Hetzner.ServerType != "cpx22" || cfg.Target.Hetzner.Location != "fsn1" || !strings.HasPrefix(strings.Join(r.calls, "; "), "create acme") {
@@ -513,7 +511,7 @@ func TestCreateByHandOnABoxUpConfigured(t *testing.T) {
 	api.Refuse = map[string]hetznertest.Error{"create_server": forbidden}
 	code, out := create()
 	_, st := loadBox(t, "acme")
-	if code != 1 || st.Applying || !notCreated(mustLoad(t, "acme")) || st.Answers["agents"] != "codex" || !strings.Contains(out, "Try another location (ash at EUR 5.49/month): keelbox up acme --location ash") {
+	if code != 1 || st.Applying || !notCreated(mustLoad(t, "acme")) || st.Answers["agents"] != "codex" || !strings.Contains(out, "Try another location (ash at EUR 5.49/month): keelbox up acme --location ash --yes") {
 		t.Fatalf("exit %d, state %+v\n%s", code, st, out)
 	}
 	api.Refuse, api.Fail = nil, map[string]bool{"create_server": true}
@@ -708,22 +706,166 @@ func TestCreateByHandStopsWhenTheMarkCannotBeWritten(t *testing.T) {
 	}
 }
 
-// A server keelbox create made for a box up configured is noted, and
-// keelbox up carries on with it instead of creating another.
-func TestCreateByHandRecordsTheServer(t *testing.T) {
+// A type Hetzner has deprecated there but still sells is created as any
+// other: its price is shown and asked about.
+func TestUpRefusedDeprecatedSizeIsPriced(t *testing.T) {
 	r, _ := refusedBox(t, forbidden)
-	cfg := mustLoad(t, "acme")
-	if ok, err := markOrdering(cfg, true); !ok || err != nil {
-		t.Fatalf("%v %v", ok, err)
+	code, out := upWith(t, r, nil, "up", "acme", "--size", "cx33")
+	text := flat(out)
+	if code != 2 || !strings.Contains(text, "cx33 in fsn1 costs about EUR 6.49 a month, against EUR 3.79 for cx23 in fsn1") ||
+		!strings.HasSuffix(strings.TrimSpace(text), "pass --yes, for example: keelbox up acme --size cx33 --yes") || len(r.calls) != 0 {
+		t.Fatalf("exit %d, calls %v\n%s", code, r.calls, out)
 	}
-	if err := recordServer(cfg, "203.0.113.7"); err != nil {
+	if cfg := mustLoad(t, "acme"); cfg.Target.Hetzner.ServerType != "cx23" {
+		t.Errorf("size %s", cfg.Target.Hetzner.ServerType)
+	}
+}
+
+// hetznerType is a type sold in each of prices' locations at its monthly
+// price (gross, as Hetzner's list gives it).
+func hetznerType(name string, prices map[string]string) hetzner.ServerType {
+	t := hetzner.ServerType{Name: name, Architecture: "x86", Cores: 2, Memory: 4}
+	for l, m := range prices {
+		t.Prices = append(t.Prices, hetzner.Price{Location: l, PriceHourly: hetzner.Amount{Gross: "0.0100"}, PriceMonthly: hetzner.Amount{Gross: m}})
+		t.Locations = append(t.Locations, hetzner.TypeLocation{Name: l, Available: true})
+	}
+	return t
+}
+
+// A type Hetzner's list gives no monthly price for is never created
+// without the go-ahead.
+func TestNewPriceWithoutAPrice(t *testing.T) {
+	isolate(t)
+	types := []hetzner.ServerType{hetznerType("cx23", map[string]string{"fsn1": "3.79"}), hetznerType("odd", map[string]string{"fsn1": ""})}
+	var out bytes.Buffer
+	w := &wizard{p: prompt.New(strings.NewReader(""), &out, false), out: &out, errOut: &out, box: "acme", o: options{set: map[string]bool{"size": true}, size: "odd"}}
+	ok, err := w.newPrice(types, "cx23", "fsn1", "odd", "fsn1")
+	if ok || err == nil || !strings.Contains(err.Error(), "the go-ahead for odd in fsn1 (no price in Hetzner's list)") || !strings.Contains(out.String(), "odd in fsn1 has no price in Hetzner's list") {
+		t.Fatalf("%v %v\n%s", ok, err, out.String())
+	}
+}
+
+// Both place flags wrong: each is named, and the example replaces both
+// with ones that work together.
+func TestUpRefusedBothPlaceFlagsWrong(t *testing.T) {
+	r, _ := refusedBox(t, forbidden)
+	code, out := upWith(t, r, nil, "up", "acme", "--location", "mars1", "--size", "cpx222")
+	want := `--location "mars1" is not a Hetzner location; use one of: fsn1, ash; --size "cpx222" is not a Hetzner server type; use one that can be ordered in ash now: cx23, cpx02, for example: keelbox up acme --location ash --size cpx02`
+	if code != 2 || !strings.HasSuffix(strings.TrimSpace(flat(out)), want) {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	// The example, as printed, gets to the go-ahead for its price.
+	code, out = upWith(t, r, nil, "up", "acme", "--location", "ash", "--size", "cpx02")
+	if code != 2 || !strings.HasSuffix(strings.TrimSpace(flat(out)), "keelbox up acme --location ash --size cpx02 --yes") {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+}
+
+// With nothing else to order where the box is, the example names a real
+// location that has a type; with nothing anywhere, it names none.
+func TestCheckPlaceWithNothingElseThere(t *testing.T) {
+	w := &wizard{box: "acme", o: options{set: map[string]bool{"size": true}, size: "cpx222"}}
+	h := config.Hetzner{Location: "fsn1", ServerType: "cx23"}
+	types := []hetzner.ServerType{hetznerType("cx23", map[string]string{"fsn1": "3.79"}), hetznerType("cpx02", map[string]string{"ash": "6.49"})}
+	_, _, err := w.checkPlace(types, nil, h)
+	if err == nil || !strings.HasSuffix(err.Error(), "use one that can be ordered in fsn1 now: cx23, for example: keelbox up acme --location ash --size cpx02") {
+		t.Errorf("got %v", err)
+	}
+	_, _, err = w.checkPlace(types[:1], nil, h)
+	if err == nil || !strings.HasSuffix(err.Error(), "Hetzner lists nothing else to order now; try again later: keelbox up acme") || strings.Contains(err.Error(), "LOCATION") {
+		t.Errorf("got %v", err)
+	}
+}
+
+// While another keelbox command holds the box, neither a move, nor a new
+// place, nor a create by hand goes ahead.
+func TestRefusedBoxLocked(t *testing.T) {
+	r, _, api := refusedBoxOn(t, forbidden)
+	fakeDO(t)
+	unlock, err := lockBox("acme", "keelbox up acme")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, st := loadBox(t, "acme"); st.Stage != stageServer || st.Address != "203.0.113.7" || st.Answers != nil || notCreated(cfg) {
-		t.Fatalf("state %+v", st)
+	defer unlock()
+	const held = "another keelbox command is working on acme; nothing changed. Wait for it to finish, then: "
+	for _, args := range [][]string{
+		{"up", "acme", "--provider", "digitalocean", "--location", "fra1", "--yes"},
+		{"up", "acme", "--location", "ash", "--yes"},
+	} {
+		code, out := upWith(t, r, nil, args...)
+		if code != 2 || !strings.HasSuffix(strings.TrimSpace(flat(out)), held+"keelbox up acme") || len(r.calls) != 0 {
+			t.Errorf("%v: exit %d\n%s", args, code, out)
+		}
 	}
-	code, out := upWith(t, r, nil, "up", "acme")
+	cfg := mustLoad(t, "acme")
+	var out strings.Builder
+	if code := cloudCreate(context.Background(), &hetznerCloud{cl: newHetznerClient(goodToken), cfg: cfg}, cfg, options{}, t.Logf, &out, &out); code != 1 ||
+		!strings.HasSuffix(strings.TrimSpace(flat(out.String())), held+"keelbox create acme") {
+		t.Errorf("exit %d\n%s", code, out.String())
+	}
+	for _, c := range api.Calls() {
+		if strings.HasPrefix(c, "POST /servers") || strings.HasPrefix(c, "POST /firewalls") {
+			t.Errorf("sent %s", c)
+		}
+	}
+	if cfg := mustLoad(t, "acme"); cfg.Target.Provider != config.ProviderHetzner || cfg.Target.Hetzner.Location != "fsn1" {
+		t.Errorf("target %+v", cfg.Target)
+	}
+}
+
+// A create by hand that loaded the box before a move finished orders
+// nothing.
+func TestCreateByHandAfterAMove(t *testing.T) {
+	_, _, api := refusedBoxOn(t, forbidden)
+	cfg := mustLoad(t, "acme")
+	s := config.StarterFor("acme", "digitalocean")
+	s.Keys = []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKey you@laptop"}
+	register(t, s)
+	var out strings.Builder
+	code := cloudCreate(context.Background(), &hetznerCloud{cl: newHetznerClient(goodToken), cfg: cfg}, cfg, options{}, t.Logf, &out, &out)
+	if code != 1 || !strings.Contains(flat(out.String()), "acme moved to digitalocean while this command started; nothing was ordered. Run it again: keelbox create acme") {
+		t.Fatalf("exit %d\n%s", code, out.String())
+	}
+	for _, c := range api.Calls() {
+		if strings.HasPrefix(c, "POST /servers") || strings.HasPrefix(c, "POST /firewalls") {
+			t.Errorf("sent %s", c)
+		}
+	}
+}
+
+// createdCloud is a cloud whose create makes the server at once.
+type createdCloud struct {
+	*hetznerCloud
+	ip string
+}
+
+func (c *createdCloud) create(context.Context, provider.HostKeyPair, func(string, ...any)) (*cloudServer, error) {
+	return &cloudServer{ref: "server 9", about: "server acme (id 9)", ip: c.ip}, nil
+}
+
+// keelbox create notes the server it made for a box up configured, as
+// soon as it exists, and keelbox up carries on with it.
+func TestCreateByHandRecordsTheServerItMade(t *testing.T) {
+	r, _ := refusedBox(t, forbidden)
+	// An ssh that answers at once and with nothing: create gets past the
+	// server's creation, then fails at the host keys.
+	bin := t.TempDir()
+	if err := os.WriteFile(bin+"/ssh", []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil { //nolint:gosec // G306: a test's fake ssh must run
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	cfg := mustLoad(t, "acme")
+	var out strings.Builder
+	cl := &createdCloud{&hetznerCloud{cl: newHetznerClient(goodToken), cfg: cfg}, "203.0.113.9"}
+	if code := cloudCreate(context.Background(), cl, cfg, options{}, t.Logf, &out, &out); code == 0 {
+		t.Fatalf("the fake ssh set the box up\n%s", out.String())
+	}
+	_, st := loadBox(t, "acme")
+	if st.Stage != stageServer || st.Address != "203.0.113.9" || !st.Applying || st.Answers != nil || notCreated(cfg) {
+		t.Fatalf("state %+v\n%s", st, out.String())
+	}
+	code, out2 := upWith(t, r, nil, "up", "acme")
 	if code != 0 || strings.Contains(strings.Join(r.calls, "; "), "create acme") || !strings.Contains(strings.Join(r.calls, "; "), "apply acme") {
-		t.Fatalf("exit %d, calls %v\n%s", code, r.calls, out)
+		t.Fatalf("exit %d, calls %v\n%s", code, r.calls, out2)
 	}
 }

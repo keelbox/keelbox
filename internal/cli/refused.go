@@ -179,9 +179,10 @@ func (r *cloudRefusal) configFix(path, retry, also string) string {
 
 // upFix is the end of a refusal when keelbox up created the box's config
 // and has no terminal to ask on: a command for each way on, each as it
-// runs. extra is added to each, as up was given it. Another location or
-// size is created without another go-ahead, so each says its price;
-// another cloud stops at the go-ahead.
+// runs. extra is added to each, as up was given it. At a new price, up
+// asks for the go-ahead again (newPrice): the commands for another
+// location or size say their price and carry --yes, which gives it;
+// another cloud has no --yes and stops at that cloud's go-ahead.
 func (r *cloudRefusal) upFix(box, provider, extra string) string {
 	up := "keelbox up " + box
 	move := "another cloud, with your other answers kept: " + moveCommands(box, provider, extra)
@@ -190,10 +191,10 @@ func (r *cloudRefusal) upFix(box, provider, extra string) string {
 	}
 	var ways []string
 	if len(r.otherLocations) > 0 {
-		ways = append(ways, fmt.Sprintf("another location (%s): %s --location %s%s", r.pricedLocations(), up, r.otherLocations[0], extra))
+		ways = append(ways, fmt.Sprintf("another location (%s): %s --location %s%s --yes", r.pricedLocations(), up, r.otherLocations[0], extra))
 	}
 	if len(r.otherSizes) > 0 {
-		ways = append(ways, fmt.Sprintf("another size in %s (%s): %s --size %s%s", r.location, r.pricedSizes(), up, r.otherSizes[0], extra))
+		ways = append(ways, fmt.Sprintf("another size in %s (%s): %s --size %s%s --yes", r.location, r.pricedSizes(), up, r.otherSizes[0], extra))
 	}
 	ways = append(ways, move)
 	return "Try " + strings.Join(ways, "; ") + "; or the same again later: " + up + extra
@@ -280,6 +281,11 @@ func (w *wizard) placeAgain(ctx context.Context, cfg *config.Config) (bool, erro
 		return true, nil
 	}
 	box, path, h := cfg.Box, boxConfigPath(cfg.Box), cfg.Target.Hetzner
+	// Held to the end of the run: a keelbox create meanwhile would order
+	// where the config no longer says.
+	if err := w.lock(box); err != nil {
+		return false, err
+	}
 	failed := func(err error) error {
 		return fmt.Errorf("nothing changed; %v. Try again: %s", err, w.upCommand(nil))
 	}
@@ -291,48 +297,19 @@ func (w *wizard) placeAgain(ctx context.Context, cfg *config.Config) (bool, erro
 	if err != nil {
 		return false, failed(err)
 	}
-	// The ways on a refusal of the box as it is configured would offer:
-	// the examples below suggest them before anything else.
-	was := hetzner.NewRefusedError(nil, box, h.Location, h.ServerType, types, "")
-	loc, size := h.Location, h.ServerType
+	var locNames []string
 	if w.o.set["location"] {
 		locs, err := cl.Locations(ctx)
 		if err != nil {
 			return false, failed(err)
 		}
-		var names, others []string
 		for _, l := range locs {
-			names = append(names, l.Name)
-			if l.Name != h.Location {
-				others = append(others, l.Name)
-			}
+			locNames = append(locNames, l.Name)
 		}
-		if !contains(names, w.o.location) {
-			ex := firstNonEmpty(append(append(append([]string(nil), was.OtherLocations...), others...), "fsn1")...)
-			return false, fmt.Errorf("--location %q is not a Hetzner location; use one of: %s, for example: %s",
-				w.o.location, strings.Join(names, ", "), w.upCommand(map[string]string{"location": ex}))
-		}
-		loc = w.o.location
 	}
-	if w.o.set["size"] {
-		if _, ok := hetzner.TypeNamed(types, w.o.size); !ok {
-			var names, others []string
-			for _, o := range hetzner.Offers(types, loc) {
-				names = append(names, o.Type.Name)
-				if o.Type.Name != h.ServerType {
-					others = append(others, o.Type.Name)
-				}
-			}
-			near := hetzner.NewRefusedError(nil, box, loc, h.ServerType, types, "").OtherTypes
-			ex := firstNonEmpty(append(near, others...)...)
-			if ex == "" {
-				return false, fmt.Errorf("--size %q is not a Hetzner server type, and no other can be ordered in %s now; try another location: %s",
-					w.o.size, loc, w.upCommand(map[string]string{"location": "LOCATION", "size": ""}))
-			}
-			return false, fmt.Errorf("--size %q is not a Hetzner server type; use one that can be ordered in %s now: %s, for example: %s",
-				w.o.size, loc, strings.Join(names, ", "), w.upCommand(map[string]string{"size": ex}))
-		}
-		size = w.o.size
+	loc, size, err := w.checkPlace(types, locNames, h)
+	if err != nil {
+		return false, err
 	}
 	var keys []string
 	for _, f := range []struct{ flag, key, value string }{
@@ -364,44 +341,114 @@ func (w *wizard) placeAgain(ctx context.Context, cfg *config.Config) (bool, erro
 	return true, nil
 }
 
-// monthly is a Hetzner type's monthly price in a location, and whether
-// it can be ordered there.
-func monthly(types []hetzner.ServerType, size, location string) (float64, bool) {
-	for _, o := range hetzner.Offers(types, location) {
-		if o.Type.Name == size {
-			return o.Monthly, true
+// checkPlace checks --location against locNames, Hetzner's locations,
+// and --size against its server types, and returns where the box would
+// be created and as what. With either wrong, the error names each wrong
+// flag and ends with an example that works as printed: the flags given,
+// each wrong one replaced by one that can be ordered, never the place or
+// size the box has now (it may be the one refused), or left out where
+// there is none.
+func (w *wizard) checkPlace(types []hetzner.ServerType, locNames []string, h config.Hetzner) (loc, size string, err error) {
+	loc, size = h.Location, h.ServerType
+	_, sizeKnown := hetzner.TypeNamed(types, w.o.size)
+	badLoc := w.o.set["location"] && !contains(locNames, w.o.location)
+	badSize := w.o.set["size"] && !sizeKnown
+	if w.o.set["location"] && !badLoc {
+		loc = w.o.location
+	}
+	if w.o.set["size"] && !badSize {
+		size = w.o.size
+	}
+	if !badLoc && !badSize {
+		return loc, size, nil
+	}
+	change := map[string]string{}
+	var why []string
+	if badLoc {
+		// Where the size can be ordered first, then any other location.
+		cands := hetzner.OrderableElsewhere(types, size, h.Location)
+		for _, n := range locNames {
+			if n != h.Location {
+				cands = append(cands, n)
+			}
+		}
+		change["location"] = firstNonEmpty(cands...)
+		if change["location"] != "" {
+			loc = change["location"]
+		}
+		why = append(why, fmt.Sprintf("--location %q is not a Hetzner location; use one of: %s", w.o.location, strings.Join(locNames, ", ")))
+	}
+	if badSize {
+		var names, others []string
+		for _, o := range hetzner.Offers(types, loc) {
+			names = append(names, o.Type.Name)
+			if o.Type.Name != h.ServerType {
+				others = append(others, o.Type.Name)
+			}
+		}
+		ex := firstNonEmpty(append(hetzner.NewRefusedError(nil, w.box, loc, h.ServerType, types, "").OtherTypes, others...)...)
+		if ex == "" {
+			// Nothing else there: the nearest type in another location
+			// that has one.
+			like, _ := hetzner.TypeNamed(types, h.ServerType)
+			for _, l := range hetzner.OfferLocations(types) {
+				if offers := hetzner.Offers(types, l); l != loc && len(offers) > 0 {
+					change["location"], ex = l, hetzner.NearestOffers(offers, like)[0].Type.Name
+					break
+				}
+			}
+		}
+		change["size"] = ex
+		if len(names) > 0 {
+			why = append(why, fmt.Sprintf("--size %q is not a Hetzner server type; use one that can be ordered in %s now: %s", w.o.size, loc, strings.Join(names, ", ")))
+		} else {
+			why = append(why, fmt.Sprintf("--size %q is not a Hetzner server type, and none can be ordered in %s now", w.o.size, loc))
 		}
 	}
-	return 0, false
+	msg := strings.Join(why, "; ")
+	if change["size"] == "" && badSize || change["location"] == "" && badLoc {
+		// No example to give for a flag: the rest, or the same later.
+		return "", "", fmt.Errorf("%s. Hetzner lists nothing else to order now; try again later: %s", msg, w.upCommand(change))
+	}
+	return "", "", fmt.Errorf("%s, for example: %s", msg, w.upCommand(change))
 }
 
 // newPrice says what the box costs as size in loc, against wasSize in
-// wasLoc, which the go-ahead showed. The same price carries on; another
-// is asked about on a terminal, and needs --yes without one. A size not
-// sold there carries on: Hetzner's list refuses it before any order. It
+// wasLoc, which the go-ahead showed. It goes by what Create orders: any
+// type Hetzner lists as available there, deprecated or not. The same
+// price carries on; another, or one Hetzner's list does not give, is
+// asked about on a terminal and needs --yes without one. A type not
+// available there carries on: Create refuses it before any order. It
 // reports false when the user declines.
 func (w *wizard) newPrice(types []hetzner.ServerType, wasSize, wasLoc, size, loc string) (bool, error) {
-	now, ok := monthly(types, size, loc)
-	if !ok {
+	t, _ := hetzner.TypeNamed(types, size)
+	now, orderable, priced := t.MonthlyIn(loc)
+	if !orderable {
 		return true, nil
 	}
-	before, shown := monthly(types, wasSize, wasLoc)
-	if shown && fmt.Sprintf("%.2f", before) == fmt.Sprintf("%.2f", now) {
-		w.logf("%s in %s costs about EUR %.2f a month, as before", size, loc, now)
-		return true, nil
+	old, _ := hetzner.TypeNamed(types, wasSize)
+	before, _, shown := old.MonthlyIn(wasLoc)
+	cost, says := "no price in Hetzner's list", "has no price in Hetzner's list"
+	if priced {
+		cost = fmt.Sprintf("about EUR %.2f a month", now)
+		says = "costs " + cost
+		if shown && fmt.Sprintf("%.2f", before) == fmt.Sprintf("%.2f", now) {
+			w.logf("%s in %s %s, as before", size, loc, says)
+			return true, nil
+		}
 	}
 	was := ""
 	if shown {
 		was = fmt.Sprintf(", against EUR %.2f for %s in %s", before, wasSize, wasLoc)
 	}
-	w.logf("%s in %s costs about EUR %.2f a month%s, billed by Hetzner until keelbox destroy %s", size, loc, now, was, w.box)
+	w.logf("%s in %s %s%s, billed by Hetzner until keelbox destroy %s", size, loc, says, was, w.box)
 	if w.o.yes {
 		return true, nil
 	}
 	if !w.p.Interactive() {
-		return false, w.needFlag(fmt.Sprintf("the go-ahead at the new price (about EUR %.2f a month)", now), "--yes", w.upCommand(map[string]string{"yes": "true"}))
+		return false, w.needFlag("the go-ahead for "+size+" in "+loc+" ("+cost+")", "--yes", w.upCommand(map[string]string{"yes": "true"}))
 	}
-	ok, err := w.p.Confirm(fmt.Sprintf("Create the server as %s in %s (about EUR %.2f a month until you destroy it)?", size, loc, now), true)
+	ok, err := w.p.Confirm(fmt.Sprintf("Create the server as %s in %s (%s until you destroy it)?", size, loc, cost), true)
 	if err != nil || ok {
 		return ok, err
 	}
@@ -598,6 +645,11 @@ func (w *wizard) moveCloud(ctx context.Context, name string, cfg *config.Config)
 	// What carries the move on is this command with the flags it was
 	// given; the kept answers come from the box's progress again.
 	w.moving, w.next = cfg.Target.Provider, w.upCommand(nil)
+	// Held to the end of the run: a keelbox create meanwhile would order
+	// on the cloud the box is leaving.
+	if err := w.lock(name); err != nil {
+		return 2, err
+	}
 	if err := w.noServerYet(ctx, cfg, w.next, "keelbox forget "+name+", then: "+w.next); err != nil {
 		return 2, err
 	}

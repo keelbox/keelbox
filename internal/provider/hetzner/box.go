@@ -137,7 +137,8 @@ func removeUnusedFirewall(ctx context.Context, cl *Client, box string, made bool
 	}
 	switch {
 	case err != nil:
-		return stays("looking it up again failed: " + err.Error())
+		// Whether it is in use is not known: no advice to delete it.
+		return fmt.Sprintf("No server was created. The firewall %s is left as it was: looking it up again failed (%v)%s", name, err, key)
 	case f == nil:
 		return "No server was created" + key
 	case len(f.AppliedTo) > 0:

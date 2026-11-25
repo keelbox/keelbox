@@ -119,7 +119,7 @@ func TestCreateRefusedKeepsItsFirewallWhenUnsure(t *testing.T) {
 		{"attached", "", func(a *hetznertest.API) {
 			a.Firewalls[0]["applied_to"] = []any{map[string]any{"type": "server", "server": map[string]any{"id": 99}}}
 		}},
-		{"lookup fails", "looking it up again failed: ", func(a *hetznertest.API) { a.Fail = map[string]bool{"list_firewalls": true} }},
+		{"lookup fails", "", func(a *hetznertest.API) { a.Fail = map[string]bool{"list_firewalls": true} }},
 		{"delete fails", "deleting it failed: ", func(a *hetznertest.API) { a.Fail = map[string]bool{"delete_firewall": true} }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -138,9 +138,13 @@ func TestCreateRefusedKeepsItsFirewallWhenUnsure(t *testing.T) {
 			}
 			msg := err.Error()
 			ok := strings.Contains(msg, "No server was created. The firewall keelbox-acme stays ("+c.why) && strings.HasSuffix(msg, tail)
-			if c.why == "" {
+			switch c.name {
+			case "attached":
 				// Not to be deleted by hand: it is in use.
 				ok = strings.HasSuffix(msg, "No server was created. The firewall keelbox-acme stays as it is: something is attached to it; your SSH key stays in the project for the next try")
+			case "lookup fails":
+				// Whether it is in use is not known.
+				ok = strings.Contains(msg, "No server was created. The firewall keelbox-acme is left as it was: looking it up again failed (hetzner api: 500") && !strings.Contains(msg, "delete it")
 			}
 			if !ok {
 				t.Errorf("got %s", msg)

@@ -511,7 +511,18 @@ func cloudCreate(ctx context.Context, cl cloud, cfg *config.Config, o options, l
 	// on, it is no longer one whose cloud may change (notCreated).
 	ordering := false
 	if o.hooks == nil && boxRef(cfg, o.configFile) == cfg.Box {
-		var err error
+		// keelbox create by hand: no keelbox up on the box meanwhile, which
+		// could move it to another cloud while this one orders.
+		unlock, err := lockBox(cfg.Box, "keelbox create "+cfg.Box)
+		if err != nil {
+			fail(stderr, err)
+			return 1
+		}
+		defer unlock()
+		if now, err := config.Load(boxConfigPath(cfg.Box)); err == nil && now.Target.Provider != cfg.Target.Provider {
+			failf(stderr, "%s moved to %s while this command started; nothing was ordered. Run it again: keelbox create %s\n", cfg.Box, now.Target.Provider, cfg.Box)
+			return 1
+		}
 		if ordering, err = markOrdering(cfg, true); err != nil {
 			failf(stderr, "nothing was ordered: keelbox could not note in %s that %s's server is being created (%v). Make it writable, then: keelbox create %s\n",
 				tildePath(upStatePath(cfg.Box)), cfg.Box, err, cfg.Box)
@@ -547,7 +558,7 @@ func cloudCreate(ctx context.Context, cl cloud, cfg *config.Config, o options, l
 	if ordering {
 		// keelbox up carries on with this server, not another create.
 		if err := recordServer(cfg, srv.ip); err != nil {
-			notef(stderr, "could not note %s's server in %s (%v); keelbox up %s would try to create it again: run keelbox apply %s instead", cfg.Box, tildePath(upStatePath(cfg.Box)), err, cfg.Box, cfg.Box)
+			notef(stderr, "could not note %s's server in %s (%v); keelbox up %s would stop at it as a server that already exists. Once this create is done, converge the box with: keelbox apply %s", cfg.Box, tildePath(upStatePath(cfg.Box)), err, cfg.Box, cfg.Box)
 		}
 	}
 	ip := addr{srv.ip, cfg.Target.SSH.Port}
