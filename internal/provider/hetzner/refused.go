@@ -10,10 +10,11 @@ import (
 // reason of its own: the type is out of stock in the location, or the
 // account may not order there for now. Since June 2026 Hetzner limits new
 // servers per location for new customers and some existing ones, citing
-// hardware; affected accounts can neither create nor rescale servers there
-// until the limit lifts by itself. The API's code for that is not
-// documented, so any 403, 412 or 422 that is not about keelbox's own
-// request counts (docs/adr/0095-hetzner-refusals.md).
+// hardware; affected accounts can neither create nor rescale servers
+// there. The API's code for that is not documented, so any 403, 412 or
+// 422 that is not about keelbox's own request counts. A project at one of
+// its limits (resource_limit_exceeded) is refused everywhere, until the
+// limit is raised or a server deleted (docs/adr/0095-hetzner-refusals.md).
 
 // RefusedError is Hetzner declining an order: what was refused, Hetzner's
 // own answer, and what keelbox did about what it had made for it.
@@ -44,24 +45,38 @@ type RefusedError struct {
 
 func (e *RefusedError) Error() string {
 	var s string
+	why := fmt.Sprintf("Hetzner may be limiting new servers for this account or in %s (status.hetzner.com)", e.Location)
+	if e.Action == "resize" {
+		why = fmt.Sprintf("Hetzner may be limiting changes to servers for this account or in %s (status.hetzner.com)", e.Location)
+	}
+	if e.Quota() {
+		why = "The project is at one of its Hetzner limits, such as its number of servers or cores, in every location. Ask Hetzner for a higher limit in the Hetzner Console, or delete a server you no longer need"
+	}
 	switch {
 	case e.API == nil:
 		s = fmt.Sprintf("Hetzner lists server type %s as not orderable in %s now", e.ServerType, e.Location)
 	case e.Action == "resize":
-		s = fmt.Sprintf("Hetzner refused to change server %d to %s (%v). Hetzner may be limiting changes to servers for this account or in %s, and lifts such limits by itself (status.hetzner.com)",
-			e.Server, e.ServerType, e.API, e.Location)
+		s = fmt.Sprintf("Hetzner refused to change server %d to %s (%v). %s", e.Server, e.ServerType, e.API, why)
 	case e.Action == "resume":
-		s = fmt.Sprintf("Hetzner refused to create %s's server again from its snapshot, %s in %s (%v). Hetzner may be limiting new servers for this account or in %s, and lifts such limits by itself (status.hetzner.com)",
-			e.Box, e.ServerType, e.Location, e.API, e.Location)
+		s = fmt.Sprintf("Hetzner refused to create %s's server again from its snapshot, %s in %s (%v). %s", e.Box, e.ServerType, e.Location, e.API, why)
 	default:
-		s = fmt.Sprintf("Hetzner refused to create %s's server, %s in %s (%v). Hetzner may be limiting new servers for this account or in %s, and lifts such limits by itself (status.hetzner.com)",
-			e.Box, e.ServerType, e.Location, e.API, e.Location)
+		s = fmt.Sprintf("Hetzner refused to create %s's server, %s in %s (%v). %s", e.Box, e.ServerType, e.Location, e.API, why)
 	}
 	if e.Left != "" {
 		s += ". " + e.Left
 	}
 	return s
 }
+
+// NewRefusedError is Hetzner's answer api to an order for box, as Create
+// returns it, with the alternatives from types filled in.
+func NewRefusedError(api *APIError, box, location, serverType string, types []ServerType, left string) *RefusedError {
+	return (&RefusedError{API: api, Action: "create", Box: box, Location: location, ServerType: serverType, Types: types, Left: left}).alternatives(nil)
+}
+
+// Quota reports whether the project is at one of its limits: no other
+// location or size changes that, and it does not pass by itself.
+func (e *RefusedError) Quota() bool { return e.API != nil && e.API.Code == "resource_limit_exceeded" }
 
 func (e *RefusedError) Unwrap() error {
 	if e.API == nil {
@@ -102,15 +117,67 @@ func refusal(err error) (*APIError, bool) {
 }
 
 // alternatives fills in OtherTypes and OtherLocations from Types; fits
-// says which types would do, nil for any.
+// says which types would do, nil for any. The types are the nearest to
+// the one asked for first (NearestOffers), of its architecture only.
 func (e *RefusedError) alternatives(fits func(ServerType) bool) *RefusedError {
-	for _, o := range Offers(e.Types, e.Location) {
-		if o.Type.Name != e.ServerType && (fits == nil || fits(o.Type)) {
-			e.OtherTypes = append(e.OtherTypes, o.Type.Name)
+	like, ok := TypeNamed(e.Types, e.ServerType)
+	for _, o := range NearestOffers(Offers(e.Types, e.Location), like) {
+		if o.Type.Name == e.ServerType || (fits != nil && !fits(o.Type)) || (ok && archFor(o.Type) != archFor(like)) {
+			continue
 		}
+		e.OtherTypes = append(e.OtherTypes, o.Type.Name)
 	}
 	e.OtherLocations = OrderableElsewhere(e.Types, e.ServerType, e.Location)
 	return e
+}
+
+// TypeNamed is the type of that name in the list, and whether there is
+// one.
+func TypeNamed(types []ServerType, name string) (ServerType, bool) {
+	for _, t := range types {
+		if t.Name == name {
+			return t, true
+		}
+	}
+	return ServerType{}, false
+}
+
+// NearestOffers orders offers by how near each is to the type like: of
+// its architecture with at least its cores and memory, cheapest first;
+// then the rest of its architecture; then the other architecture. Each
+// group keeps the offers' own order. like's zero value keeps them as they
+// are.
+func NearestOffers(offers []Offer, like ServerType) []Offer {
+	if like.Name == "" {
+		return offers
+	}
+	rank := func(o Offer) int {
+		switch {
+		case archFor(o.Type) != archFor(like):
+			return 2
+		case o.Type.Cores >= like.Cores && o.Type.Memory >= like.Memory:
+			return 0
+		}
+		return 1
+	}
+	out := append([]Offer(nil), offers...)
+	sort.SliceStable(out, func(i, j int) bool { return rank(out[i]) < rank(out[j]) })
+	return out
+}
+
+// NearestOffer is the index in offers of the offer nearest to like, or of
+// DefaultOffer's pick when like is not known.
+func NearestOffer(offers []Offer, like ServerType) int {
+	if like.Name == "" || len(offers) == 0 {
+		return DefaultOffer(offers)
+	}
+	best := NearestOffers(offers, like)[0]
+	for i, o := range offers {
+		if o.Type.Name == best.Type.Name {
+			return i
+		}
+	}
+	return DefaultOffer(offers)
 }
 
 // OrderableElsewhere lists, by name, the locations other than location

@@ -40,17 +40,23 @@ func TestCreateRefusedKeepsHetznersAnswerAndRemovesTheFirewall(t *testing.T) {
 			for _, want := range []string{
 				"Hetzner refused to create acme's server, cx23 in fsn1",
 				fmt.Sprintf("hetzner api: %d %s: %s", e.Status, e.Code, e.Message),
-				"Hetzner may be limiting new servers for this account or in fsn1",
 				"No server was created, and keelbox deleted the firewall it had made for it",
 			} {
 				if !strings.Contains(msg, want) {
 					t.Errorf("message lacks %q:\n%s", want, msg)
 				}
 			}
+			why := "Hetzner may be limiting new servers for this account or in fsn1 (status.hetzner.com)"
+			if e.Code == "resource_limit_exceeded" {
+				why = "The project is at one of its Hetzner limits, such as its number of servers or cores, in every location. Ask Hetzner for a higher limit in the Hetzner Console, or delete a server you no longer need"
+			}
+			if !strings.Contains(msg, why) || strings.Contains(msg, "by itself") || re.Quota() != (e.Code == "resource_limit_exceeded") {
+				t.Errorf("message lacks %q:\n%s", why, msg)
+			}
 			if len(a.Servers) != 0 || len(a.Firewalls) != 0 || !strings.Contains(strings.Join(said, "\n"), "deleted firewall keelbox-acme") {
 				t.Errorf("left %d servers, %d firewalls", len(a.Servers), len(a.Firewalls))
 			}
-			if strings.Join(re.OtherLocations, ",") != "ash" || strings.Join(re.OtherTypes, ",") != "cax11,cpx02,cpx22,ccx13" {
+			if strings.Join(re.OtherLocations, ",") != "ash" || strings.Join(re.OtherTypes, ",") != "cpx22,ccx13,cpx02" {
 				t.Errorf("alternatives: locations %v, types %v", re.OtherLocations, re.OtherTypes)
 			}
 			var ae *APIError
@@ -61,6 +67,28 @@ func TestCreateRefusedKeepsHetznersAnswerAndRemovesTheFirewall(t *testing.T) {
 				t.Error("token in the message")
 			}
 		})
+	}
+}
+
+// A firewall that was there before the create stays as it is, attached
+// to whatever it is attached to.
+func TestCreateRefusedLeavesAFirewallItDidNotMake(t *testing.T) {
+	cl, a := fake(t)
+	a.Keys = []hetznertest.Key{{ID: 7, Name: "laptop"}}
+	a.Firewalls = []map[string]any{hetznertest.Firewall(7, "acme", 42)}
+	a.Refuse = map[string]hetznertest.Error{"create_server": refusals[0]}
+	_, err := Create(context.Background(), cl, boxConfig(t, "ubuntu-26.04"), testHostKey, t.Logf)
+	want := "No server was created. The firewall keelbox-acme stays (it was there before this create), free of charge; should acme move to another cloud, delete it in the Hetzner Console (Firewalls); your SSH key stays in the project for the next try"
+	if err == nil || !strings.HasSuffix(err.Error(), want) {
+		t.Fatalf("got %v", err)
+	}
+	if len(a.Firewalls) != 1 || len(a.Firewalls[0]["applied_to"].([]any)) != 1 {
+		t.Errorf("firewall changed: %v", a.Firewalls)
+	}
+	for _, c := range a.Calls() {
+		if strings.Contains(c, "/firewalls/7") && !strings.HasPrefix(c, "GET ") {
+			t.Errorf("sent %s", c)
+		}
 	}
 }
 

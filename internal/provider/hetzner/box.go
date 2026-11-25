@@ -77,6 +77,10 @@ func Create(ctx context.Context, cl *Client, c *config.Config, hk HostKey, logf 
 	// The firewall exists before the server, so the server never boots
 	// without it. A new one admits SSH; apply closes it once the tailnet
 	// is proven.
+	had, err := FindFirewall(ctx, cl, c.Box)
+	if err != nil {
+		return nil, fmt.Errorf("cloud firewall: %w", err)
+	}
 	fw, changes, err := EnsureFirewall(ctx, cl, c, 0, nil)
 	if err != nil {
 		return nil, fmt.Errorf("cloud firewall: %w", err)
@@ -93,7 +97,7 @@ func Create(ctx context.Context, cl *Client, c *config.Config, hk HostKey, logf 
 	})
 	if ae, ok := refusal(err); ok {
 		return nil, (&RefusedError{API: ae, Action: "create", Box: c.Box, Location: h.Location, ServerType: st.Name, Types: types,
-			Left: removeUnusedFirewall(ctx, cl, c.Box, logf)}).alternatives(nil)
+			Left: removeUnusedFirewall(ctx, cl, c.Box, had == nil, logf)}).alternatives(nil)
 	}
 	if err != nil {
 		return nil, err
@@ -108,20 +112,39 @@ func Create(ctx context.Context, cl *Client, c *config.Config, hk HostKey, logf 
 	}
 }
 
-// removeUnusedFirewall deletes the box's firewall after Hetzner refused to
-// create its server: the box has no server (Create checked), so the
-// firewall serves nothing, and a box that moves to another cloud would
-// leave it behind. The next create makes it again. It returns what is
+// removeUnusedFirewall deletes the firewall Create made for the box after
+// Hetzner refused to create its server: the box has no server (Create
+// checked), so the firewall serves nothing, and a box that moves to
+// another cloud would leave it behind. The next create makes it again. A
+// firewall that was there before, or that is attached to anything, stays
+// as it is. made says whether this Create made it. It returns what is
 // left, as a sentence.
-func removeUnusedFirewall(ctx context.Context, cl *Client, box string, logf func(string, ...any)) string {
-	f, err := DestroyFirewall(context.WithoutCancel(ctx), cl, box)
+func removeUnusedFirewall(ctx context.Context, cl *Client, box string, made bool, logf func(string, ...any)) string {
+	const key = "; your SSH key stays in the project for the next try"
+	stays := func(why string) string {
+		return fmt.Sprintf("No server was created. The firewall %s stays (%s), free of charge; should %s move to another cloud, delete it in the Hetzner Console (Firewalls)%s",
+			FirewallName(box), why, box, key)
+	}
+	if !made {
+		return stays("it was there before this create")
+	}
+	ctx = context.WithoutCancel(ctx)
+	f, err := FindFirewall(ctx, cl, box)
 	switch {
 	case err != nil:
-		return fmt.Sprintf("No server was created; the firewall %s stays (deleting it failed: %v), free of charge, and the next create uses it", FirewallName(box), err)
-	case f != nil:
-		logf("deleted firewall %s (id %d) again: it was for the server Hetzner refused", f.Name, f.ID)
+		return stays("looking it up again failed: " + err.Error())
+	case f == nil:
+		return "No server was created" + key
+	case !managed(f, box):
+		return stays("it is not labelled for " + box)
+	case len(f.AppliedTo) > 0:
+		return stays("something is attached to it")
 	}
-	return "No server was created, and keelbox deleted the firewall it had made for it; your SSH key stays in the project for the next try"
+	if err := cl.DeleteFirewall(ctx, f.ID); err != nil && !apiErr(err, "", 404) {
+		return stays("deleting it failed: " + err.Error())
+	}
+	logf("deleted firewall %s (id %d) again: it was for the server Hetzner refused", f.Name, f.ID)
+	return "No server was created, and keelbox deleted the firewall it had made for it" + key
 }
 
 // Find returns the keelbox-managed server for a box.

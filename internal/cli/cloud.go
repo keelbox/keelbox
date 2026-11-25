@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/keelbox/keelbox/internal/config"
@@ -595,12 +594,7 @@ func createRefusedFix(cfg *config.Config, o options, r *cloudRefusal) string {
 	if path == "" {
 		path = boxConfigPath(cfg.Box)
 	}
-	var names []string
-	for _, e := range otherClouds(cfg.Target.Provider)[1:] {
-		names = append(names, e.via)
-	}
-	return r.configFix(path, "keelbox create "+ref, fmt.Sprintf("A box on another cloud: keelbox up %s-2 --provider %s (or %s)",
-		cfg.Box, otherClouds(cfg.Target.Provider)[0].via, strings.Join(names, ", ")))
+	return r.configFix(path, "keelbox create "+ref, fmt.Sprintf("A box on another cloud: keelbox up %s-2 --provider %s", cfg.Box, otherClouds(cfg.Target.Provider)[0].via))
 }
 
 // createdNote is the line that ends a create, with what its time covers:

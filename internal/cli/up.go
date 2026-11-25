@@ -116,6 +116,8 @@ type wizard struct {
 	via         string          // where the box runs, once known: for the step indicator
 	stepAt      string          // the step shown last
 	refused     *cloudRefusal   // the cloud's refusal of the server create asked for
+	moving      string          // while a box moves to another cloud: the one it was on
+	next        string          // the command that continues, when not keelbox up BOX
 }
 
 // banner opens keelbox up on a terminal, once, when it has its first
@@ -303,6 +305,8 @@ func cmdUp(ctx context.Context, o options, pos []string, p *prompt.Prompter, run
 	}
 	again := "keelbox up"
 	switch {
+	case w.next != "":
+		again = w.next
 	case w.box != "" && isKnown(w.box):
 		again += " " + w.box
 	case w.draft != nil && w.draft.Box != "":
@@ -355,7 +359,7 @@ func cmdUp(ctx context.Context, o options, pos []string, p *prompt.Prompter, run
 		say(ui.Stopped, fmt.Sprintf("stopped; nothing was changed.%s Continue: %s", kept, again))
 		return exitNeedsYou
 	case errors.Is(err, prompt.ErrInterrupted) || (err != nil || code != 0) && ctx.Err() != nil && !w.changing:
-		if kept != "" {
+		if kept != "" || w.box != "" && isKnown(w.box) {
 			say(ui.Stopped, fmt.Sprintf("stopped; nothing was changed.%s Continue: %s", kept, again))
 		} else {
 			say(ui.Stopped, fmt.Sprintf("stopped; nothing was changed. Start again: %s", again))
@@ -452,7 +456,7 @@ func (w *wizard) up(ctx context.Context, pos []string) (int, error) {
 				if w.o.set["provider"] && w.o.provider != cfg.Target.Provider {
 					return w.moveCloud(ctx, name, cfg)
 				}
-				if err := w.placeAgain(cfg); err != nil {
+				if err := w.placeAgain(ctx, cfg); err != nil {
 					return 2, err
 				}
 			}
@@ -608,16 +612,21 @@ func (w *wizard) configure(ctx context.Context, name string) (*config.Config, up
 	var a answers
 	w.banner()
 	if w.p.Interactive() {
-		if w.st.Live {
+		switch {
+		case w.moving != "":
+			// Mid-run, after a refusal: up said what it does.
+		case w.st.Live:
 			w.hint("Set up a box for AI coding agents. Ctrl-C stops at any question; keelbox up continues later.")
-		} else {
+		default:
 			fmt.Fprintln(w.out, w.st.Plain("keelbox up: set up a box for AI coding agents. Ctrl-C stops; keelbox up continues later.", 2))
 		}
 		if w.draft == nil {
 			w.draft = &upDraft{Answers: map[string]string{}}
 		}
 	}
-	w.step("Where the box runs")
+	if w.moving == "" {
+		w.step("Where the box runs")
+	}
 	if err := w.askWhere(ctx, &a); err != nil {
 		return nil, upState{}, false, err
 	}
@@ -760,6 +769,16 @@ func (w *wizard) configure(ctx context.Context, name string) (*config.Config, up
 // command that continues. On a terminal it is the block of a stop.
 func (w *wizard) declinedGoAhead(name string, gated, tokenStored bool) {
 	const stays = "The Hetzner token stays stored for next time; remove it: keelbox forget-token"
+	if w.moving != "" {
+		// A box moving to another cloud stays where it was configured.
+		text := fmt.Sprintf("nothing changed; %s stays on %s, with no server. Move it later: %s", name, w.moving, w.next)
+		if !w.st.Live {
+			fmt.Fprintln(w.out, w.st.Plain("keelbox up: "+text, 2))
+			return
+		}
+		fmt.Fprint(w.out, "\n"+w.st.Trouble(ui.Trouble{Severity: ui.Stopped, Text: text, Names: []string{name}}))
+		return
+	}
 	if !w.st.Live {
 		if gated {
 			fmt.Fprintln(w.out, w.st.Plain("keelbox up: nothing changed. Your answers are kept: keep what the items marked * would stop first (the hints say how), then continue: keelbox up "+name, 2))
