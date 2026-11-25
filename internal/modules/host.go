@@ -561,22 +561,6 @@ func firewallStep() engine.Step {
 	}
 }
 
-// sshdTest prints sshd's effective config: sshd -T with args. sshd refuses
-// to run without /run/sshd, which ssh.service makes when it starts. With
-// socket activation, as on Ubuntu 24.04, that waits for the first SSH
-// connection, so a check run by a timer after a boot found no directory
-// and failed though the config was right. Then sshd runs again in a mount
-// namespace of its own, with an empty /run that holds the directory: the
-// box's own /run is left as it is.
-func sshdTest(ctx context.Context, x system.Executor, args ...string) (string, error) {
-	out, err := system.Output(ctx, x, system.C("sshd", append([]string{"-T"}, args...)...))
-	if err == nil || !strings.Contains(err.Error(), "privilege separation directory") {
-		return out, err
-	}
-	return system.Output(ctx, x, system.C("unshare", append([]string{"--mount", "--propagation", "private", "--", "/bin/sh", "-c",
-		`mount -t tmpfs -o mode=0755 keelbox-check /run && mkdir -m 0755 /run/sshd && exec sshd -T "$@"`, "sh"}, args...)...))
-}
-
 func (Host) Verify(ctx context.Context, e *engine.Env) []engine.Finding {
 	var out []engine.Finding
 	add := func(check string, ok bool, detail string, fail engine.Level) {
@@ -588,7 +572,7 @@ func (Host) Verify(ctx context.Context, e *engine.Env) []engine.Finding {
 	}
 	// Effective sshd settings, not just our file: catches an earlier drop-in
 	// or Match block overriding them.
-	eff, err := sshdTest(ctx, e.X)
+	eff, err := system.SSHDConfig(ctx, e.X)
 	if err != nil {
 		add("sshd-effective", false, "sshd -T failed: "+err.Error(), engine.LevelFail)
 	} else {
@@ -606,7 +590,7 @@ func (Host) Verify(ctx context.Context, e *engine.Env) []engine.Finding {
 	out = append(out, verifyLinkLocalAccounts(e)...)
 	out = append(out, verifyResolver(e)...)
 	out = append(out, verifyAgentSchedulers(ctx, e)...)
-	if eff, err := sshdTest(ctx, e.X, "-C", "user="+e.Cfg.Users.Agent.Name+",host=localhost,addr=127.0.0.1"); err == nil {
+	if eff, err := system.SSHDConfig(ctx, e.X, "-C", "user="+e.Cfg.Users.Agent.Name+",host=localhost,addr=127.0.0.1"); err == nil {
 		add("ssh-agent-forwarding", strings.Contains(eff, "allowagentforwarding no"), "no agent forwarding for "+e.Cfg.Users.Agent.Name, engine.LevelFail)
 	}
 	listening := system.Succeeds(ctx, e.X, system.C("systemctl", "is-active", "--quiet", "ssh.socket")) ||
