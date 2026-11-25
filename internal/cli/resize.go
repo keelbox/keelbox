@@ -303,7 +303,7 @@ func cloudResize(ctx context.Context, cl cloud, cfg *config.Config, o options, p
 	if err := cl.stop(ctx, srv, v.note); err != nil {
 		v.failed()
 		fmt.Fprintln(stderr, "keelbox: the server did not shut down:", err)
-		return startAgain(ctx, cl, srv, box, from.name, ref, v, stderr)
+		return startAgain(ctx, cl, srv, box, from.name, ref, "", v, stderr)
 	}
 	v.finished("Shut "+box+" down", "")
 	v.begin(fmt.Sprintf("Changing %s from %s to %s", srv.ref, from.name, to.name), "")
@@ -319,7 +319,11 @@ func cloudResize(ctx context.Context, cl cloud, cfg *config.Config, o options, p
 			fmt.Fprintf(stderr, "keelbox: %s is parked: %s holds its disk. Bring it back: keelbox resume %s\n", box, left.parked.ref, ref)
 			return 1
 		}
-		return startAgain(ctx, cl, srv, box, from.name, ref, v, stderr)
+		var refused *cloudRefusal
+		if errors.As(err, &refused) {
+			return startAgain(ctx, cl, srv, box, from.name, ref, "Try another size, or "+to.name+" again later: keelbox resize "+ref, v, stderr)
+		}
+		return startAgain(ctx, cl, srv, box, from.name, ref, "", v, stderr)
 	}
 	v.finished(fmt.Sprintf("Changed %s from %s to %s", srv.ref, from.name, to.name), "")
 	v.begin("Starting "+resized.ref, "")
@@ -363,15 +367,20 @@ func cloudResize(ctx context.Context, cl cloud, cfg *config.Config, o options, p
 	return 0
 }
 
-// startAgain starts a server resize stopped and could not change.
-func startAgain(ctx context.Context, cl cloud, srv *cloudServer, box, size, ref string, v *stepView, stderr io.Writer) int {
+// startAgain starts a server resize stopped and could not change. next is
+// the sentence that ends what it says once the server runs again; empty
+// for "Try again: keelbox resize BOX".
+func startAgain(ctx context.Context, cl cloud, srv *cloudServer, box, size, ref, next string, v *stepView, stderr io.Writer) int {
+	if next == "" {
+		next = "Try again: keelbox resize " + ref
+	}
 	v.begin("Starting "+srv.ref+" again", "")
 	if s, err := cl.start(ctx, srv); err != nil {
 		v.failed()
 		fmt.Fprintf(stderr, "keelbox: %s is still %s, but starting it again failed: %v. Start it: keelbox resume %s\n", box, size, err, ref)
 	} else {
 		v.finished(fmt.Sprintf("%s runs again at %s", s.ref, s.ip), "")
-		fmt.Fprintf(stderr, "keelbox: %s is still %s and runs again at %s. Try again: keelbox resize %s\n", box, size, s.ip, ref)
+		fmt.Fprintf(stderr, "keelbox: %s is still %s and runs again at %s. %s\n", box, size, s.ip, next)
 	}
 	return 1
 }
@@ -381,30 +390,40 @@ func startAgain(ctx context.Context, cl cloud, srv *cloudServer, box, size, ref 
 // the box. A file that cannot be edited that way is left as it is, and the
 // line to set is printed. did says the edit.
 func setSize(cfg *config.Config, path, key, size string, did func(string, ...any), stderr io.Writer) {
-	parts := strings.Split(key, ".")
-	leaf, parent := parts[len(parts)-1], strings.Join(parts[:len(parts)-1], ".")
-	byHand := func(why error) {
-		fmt.Fprintf(stderr, "keelbox: could not set %s in %s (%v). Set it yourself, so the config says what the server is; under %s:\n      %s: %s\n", key, tildePath(path), why, parent, leaf, size)
+	changed, err := setConfigKey(cfg, path, key, size)
+	if err != nil {
+		parts := strings.Split(key, ".")
+		leaf, parent := parts[len(parts)-1], strings.Join(parts[:len(parts)-1], ".")
+		fmt.Fprintf(stderr, "keelbox: could not set %s in %s (%v). Set it yourself, so the config says what the server is; under %s:\n      %s: %s\n", key, tildePath(path), err, parent, leaf, size)
+		return
 	}
+	if changed {
+		did("set %s: %s in %s", key, size, tildePath(path))
+	}
+}
+
+// setConfigKey sets the scalar at key, a dotted path, in the box's config
+// at path, keeping every other line and comment, and in cfg. The edit is
+// kept only if the file then says the new value and still loads; else the
+// file is left as it was and the error says why. It reports whether
+// anything changed.
+func setConfigKey(cfg *config.Config, path, key, value string) (bool, error) {
+	parts := strings.Split(key, ".")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		byHand(err)
-		return
+		return false, err
 	}
-	if v, _ := yamlValue(data, parts); v == size {
-		return
+	if v, _ := yamlValue(data, parts); v == value {
+		return false, nil
 	}
-	out, err := setYAMLKey(string(data), parts, size)
+	out, err := setYAMLKey(string(data), parts, value)
 	if err == nil {
-		// The edit is kept only if the file then says the new size and
-		// still loads.
-		if v, verr := yamlValue([]byte(out), parts); verr != nil || v != size {
-			err = errors.New("the edited file would not say the new size")
+		if v, verr := yamlValue([]byte(out), parts); verr != nil || v != value {
+			err = errors.New("the edited file would not say the new value")
 		}
 	}
 	if err != nil {
-		byHand(err)
-		return
+		return false, err
 	}
 	fi, _ := os.Stat(path)
 	mode := os.FileMode(0o644)
@@ -412,19 +431,17 @@ func setSize(cfg *config.Config, path, key, size string, did func(string, ...any
 		mode = fi.Mode().Perm()
 	}
 	if err := os.WriteFile(path, []byte(out), mode); err != nil { //nolint:gosec // G703: the box's own config, the file this command was given
-		byHand(err)
-		return
+		return false, err
 	}
 	next, err := config.Load(path)
 	if err != nil {
 		// Not this edit: put the file back as it was.
 		_ = os.WriteFile(path, data, mode) //nolint:gosec // G703: the file as it was
-		byHand(err)
-		return
+		return false, err
 	}
-	// The cloud holds cfg too: both see the new size.
+	// The cloud holds cfg too: both see the new value.
 	*cfg = *next
-	did("set %s: %s in %s", key, size, tildePath(path))
+	return true, nil
 }
 
 // yamlValue is the scalar at a path of mapping keys in a YAML document.

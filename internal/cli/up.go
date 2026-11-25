@@ -40,6 +40,18 @@ const exitNeedsYou = 3
 // upHooks report progress from inside create to up's state.
 type upHooks struct {
 	onServer func(ip string)
+	// onRefused takes a cloud's refusal to create the server; up says
+	// what it means and how to go on.
+	onRefused func(r *cloudRefusal)
+}
+
+// refused hands r to up, and reports whether up takes it.
+func (h *upHooks) refused(r *cloudRefusal) bool {
+	if h == nil || h.onRefused == nil {
+		return false
+	}
+	h.onRefused(r)
+	return true
 }
 
 func (h *upHooks) server(ip string) {
@@ -103,6 +115,7 @@ type wizard struct {
 	drafted     map[string]bool // flags set from the draft, not the command line
 	via         string          // where the box runs, once known: for the step indicator
 	stepAt      string          // the step shown last
+	refused     *cloudRefusal   // the cloud's refusal of the server create asked for
 }
 
 // banner opens keelbox up on a terminal, once, when it has its first
@@ -434,7 +447,16 @@ func (w *wizard) up(ctx context.Context, pos []string) (int, error) {
 					return 1, perr
 				}
 			}
-			return w.resume(ctx, cfg, st)
+			if cfg != nil && notCreated(cfg) {
+				// No server yet: where it is created may still change.
+				if w.o.set["provider"] && w.o.provider != cfg.Target.Provider {
+					return w.moveCloud(ctx, name, cfg)
+				}
+				if err := w.placeAgain(cfg); err != nil {
+					return 2, err
+				}
+			}
+			return w.carryOn(ctx, cfg, st)
 		}
 	}
 	cfg, st, proceed, err := w.configure(ctx, name)
@@ -448,7 +470,7 @@ func (w *wizard) up(ctx context.Context, pos []string) (int, error) {
 		return 0, nil // the user said no
 	}
 	w.fresh = true
-	return w.resume(ctx, cfg, st)
+	return w.carryOn(ctx, cfg, st)
 }
 
 // offerDraft: keelbox up with no name, when answers from a run that did not
@@ -706,6 +728,9 @@ func (w *wizard) configure(ctx context.Context, name string) (*config.Config, up
 		}
 	}
 	st := upState{Via: a.via, Stage: stageConfigured, Adopt: a.adopt || w.o.adopt, OfferRemoteControl: a.offerRC}
+	if isCloud(a.via) {
+		st.Answers = w.keptAnswers()
+	}
 	if a.via == viaSSH {
 		st.Bootstrap, st.Address = w.o.sshUser, a.starter.SSHHost
 		st.SudoPassword = a.facts != nil && !a.facts.Sudo
@@ -1901,7 +1926,25 @@ func (w *wizard) resume(ctx context.Context, cfg *config.Config, st upState) (in
 				return 1, err
 			}
 		}
-		if code := w.firstApply(ctx, cfg, &st); code != 0 {
+		code := w.firstApply(ctx, cfg, &st)
+		for code != 0 && w.refused != nil {
+			// The cloud created nothing: the box is as it was before the
+			// create, and where it is created may change.
+			r := w.refused
+			w.refused, st.Applying = nil, false
+			if err := saveUpState(box, st); err != nil {
+				return 1, err
+			}
+			if err := w.afterRefusal(ctx, cfg, r); err != nil {
+				return 1, err
+			}
+			st.Applying = true
+			if err := saveUpState(box, st); err != nil {
+				return 1, err
+			}
+			code = w.firstApply(ctx, cfg, &st)
+		}
+		if code != 0 {
 			if code == exitDetached {
 				return code, nil // left running on the box; the follower said how to pick it up
 			}
@@ -2046,9 +2089,10 @@ func (w *wizard) firstApply(ctx context.Context, cfg *config.Config, st *upState
 	o.adopt = o.adopt || st.Adopt
 	o.hooks = &upHooks{
 		onServer: func(ip string) {
-			st.Address, st.Bootstrap, st.Stage = ip, bootstrapUser(st.Via), stageServer
+			st.Address, st.Bootstrap, st.Stage, st.Answers = ip, bootstrapUser(st.Via), stageServer, nil
 			_ = saveUpState(box, *st)
 		},
+		onRefused: func(r *cloudRefusal) { w.refused = r },
 	}
 	if isCloud(st.Via) {
 		if st.Stage == stageConfigured {

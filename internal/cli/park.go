@@ -511,9 +511,17 @@ func cloudResume(ctx context.Context, cl cloud, cfg *config.Config, o options, l
 		if err != nil {
 			v.failed()
 			fmt.Fprintln(stderr, "keelbox:", err)
-			if srv != nil {
+			var refused *cloudRefusal
+			switch {
+			case errors.As(err, &refused):
+				path := o.configFile
+				if path == "" {
+					path = boxConfigPath(box)
+				}
+				fmt.Fprintf(stderr, "keelbox: %s is still parked: %s is kept, and nothing else changed. %s\n", box, pk.ref, refused.configFix(path, "keelbox resume "+ref, ""))
+			case srv != nil:
 				fmt.Fprintf(stderr, "keelbox: %s may exist; %s is kept. Continue: keelbox resume %s\n", srv.ref, pk.ref, ref)
-			} else {
+			default:
 				fmt.Fprintf(stderr, "keelbox: %s is still parked: %s is kept. Try again: keelbox resume %s\n", box, pk.ref, ref)
 			}
 			return 1

@@ -183,6 +183,7 @@ The steps one by one: [your first box](../getting-started.md).
 - `up` writes the config to `~/.config/keelbox/boxes/<box>.yaml`. Until then the answers wait in `~/.config/keelbox/up-draft.json`, and the next `keelbox up` offers to carry on with them.
 - `keelbox up acme` continues at the first step not done. On a box that is set up it prints the closing screen again.
 - Flags for a box that already has a config are ignored with a warning: edit the config and run `keelbox apply acme`.
+- Until a cloud box's server is created, `--provider` moves the box to another cloud with your other answers kept, and on Hetzner `--location` and `--size` change where it is created. When the cloud refuses to create the server, `up` asks how to go on, or without a terminal prints these commands.
 - A second `up` on a box while one runs stops at once.
 - For Hetzner, `up` uploads your SSH public key to the project as `keelbox-<this computer's hostname>`, or reuses a project key with the same fingerprint.
 - Under `sudo keelbox up`, the config goes to the home of the user who ran sudo.
@@ -1140,7 +1141,7 @@ All are under `~/.config/keelbox/`. Two hold a secret: `credentials/`, and a `.c
 |---|---|
 | `boxes/<box>.yaml` | The box's config, written by `up`. |
 | `up-draft.json` | `up`'s answers, until it writes the config. |
-| `boxes/<box>.up.json` | How far `up` got, and the sign-ins left for later. |
+| `boxes/<box>.up.json` | How far `up` got, the sign-ins left for later, and the answers until the cloud server exists. |
 | `boxes/<box>.cloud-config` | The cloud-config `up` printed. Deleted once keelbox has replaced its single-use host key. |
 | `boxes/<box>.run.json` | An apply this computer started on the box and has not seen end. |
 | `boxes/<box>.json` | The tailnet address keelbox last reached the box at. |

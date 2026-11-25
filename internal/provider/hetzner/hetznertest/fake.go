@@ -48,6 +48,10 @@ type API struct {
 	// change_type, create_image, delete_server, delete_image or
 	// create_server.
 	Fail map[string]bool
+	// Refuse makes create_server or change_type answer with an error of
+	// Hetzner's own, as it does when it will not take an order: by the
+	// call's name, or "create_server fsn1" for one location only.
+	Refuse map[string]Error
 	// SnapshotFails makes the action of a create_image call end in an
 	// error, leaving the image in status creating, as a failed snapshot
 	// is on Hetzner.
@@ -65,6 +69,25 @@ type API struct {
 	nextID  int
 	failed  map[string]bool // ids of actions that ended in an error
 	actions int
+}
+
+// Error is an error answer of the API.
+type Error struct {
+	Status        int
+	Code, Message string
+}
+
+// refused answers a call the fake was told to refuse, and reports whether
+// it did.
+func (a *API) refused(call, location string, fail func(int, string, string)) bool {
+	e, ok := a.Refuse[call+" "+location]
+	if !ok {
+		e, ok = a.Refuse[call]
+	}
+	if ok {
+		fail(e.Status, e.Code, e.Message)
+	}
+	return ok
 }
 
 // Server is a keelbox-made server for box as the API lists it: running,
@@ -354,7 +377,7 @@ func (a *API) project(w http.ResponseWriter, r *http.Request, body map[string]an
 		}
 		send(map[string]any{"action": map[string]any{"id": 1, "status": "success"}})
 	case p == "/servers" && r.Method == "POST":
-		if broken("create_server") {
+		if broken("create_server") || a.refused("create_server", fmt.Sprint(body["location"]), fail) {
 			return true
 		}
 		a.createServer(body, fail, send)
@@ -406,6 +429,10 @@ func (a *API) project(w http.ResponseWriter, r *http.Request, body map[string]an
 			s["status"] = "running"
 		case "change_type":
 			t := serverType(fmt.Sprint(body["server_type"]))
+			loc, _ := s["location"].(map[string]any)
+			if a.refused("change_type", fmt.Sprint(loc["name"]), fail) {
+				return true
+			}
 			switch {
 			case s["status"] != "off":
 				fail(422, "server_not_stopped", "server must be stopped")

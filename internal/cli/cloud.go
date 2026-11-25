@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/keelbox/keelbox/internal/config"
@@ -508,6 +509,13 @@ func cloudCreate(ctx context.Context, cl cloud, cfg *config.Config, o options, l
 		return 1
 	}
 	srv, err := cl.create(ctx, provider.HostKeyPair{Private: priv, Public: pub}, logf)
+	var refused *cloudRefusal
+	if errors.As(err, &refused) {
+		if !o.hooks.refused(refused) {
+			fail(stderr, fmt.Errorf("%w. %s", err, createRefusedFix(cfg, o, refused)))
+		}
+		return 1
+	}
 	if err != nil {
 		fail(stderr, err)
 		if srv != nil {
@@ -573,6 +581,26 @@ func cloudCreate(ctx context.Context, cl cloud, cfg *config.Config, o options, l
 		printNextSteps(stdout, cfg, boxRef(cfg, o.configFile))
 	}
 	return 0
+}
+
+// createRefusedFix is how keelbox create goes on after a refusal: for a
+// box keelbox up configured, the up commands that change where it is
+// created; else the config keys, and another box for another cloud.
+func createRefusedFix(cfg *config.Config, o options, r *cloudRefusal) string {
+	ref := boxRef(cfg, o.configFile)
+	if ref == cfg.Box && notCreated(cfg) {
+		return r.upFix(cfg.Box, cfg.Target.Provider, "")
+	}
+	path := o.configFile
+	if path == "" {
+		path = boxConfigPath(cfg.Box)
+	}
+	var names []string
+	for _, e := range otherClouds(cfg.Target.Provider)[1:] {
+		names = append(names, e.via)
+	}
+	return r.configFix(path, "keelbox create "+ref, fmt.Sprintf("A box on another cloud: keelbox up %s-2 --provider %s (or %s)",
+		cfg.Box, otherClouds(cfg.Target.Provider)[0].via, strings.Join(names, ", ")))
 }
 
 // createdNote is the line that ends a create, with what its time covers:
