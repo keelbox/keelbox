@@ -183,7 +183,7 @@ The steps one by one: [your first box](../getting-started.md).
 - `up` writes the config to `~/.config/keelbox/boxes/<box>.yaml`. Until then the answers wait in `~/.config/keelbox/up-draft.json`, and the next `keelbox up` offers to carry on with them.
 - `keelbox up acme` continues at the first step not done. On a box that is set up it prints the closing screen again.
 - Flags for a box that already has a config are ignored with a warning: edit the config and run `keelbox apply acme`.
-- Until a cloud box's server is created, `--provider` moves the box to another cloud with your other answers kept, and on Hetzner `--location` and `--size` change where it is created. When the cloud refuses to create the server, `up` asks how to go on, or without a terminal prints these commands. After a create that fails for another reason, the server may exist, and these flags change nothing.
+- Until a cloud box's server is created, `--provider` moves the box to another cloud with your other answers kept, and on Hetzner `--location` and `--size` change where it is created. At a new price, `up` asks again, or without a terminal needs `--yes`. When the cloud refuses to create the server, `up` asks how to go on, or without a terminal prints these commands. After a create that fails for another reason, the server may exist, and these flags change nothing.
 - A second `up` on a box while one runs stops at once.
 - For Hetzner, `up` uploads your SSH public key to the project as `keelbox-<this computer's hostname>`, or reuses a project key with the same fingerprint.
 - Under `sudo keelbox up`, the config goes to the home of the user who ran sudo.

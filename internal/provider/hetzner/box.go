@@ -121,17 +121,14 @@ func Create(ctx context.Context, cl *Client, c *config.Config, hk HostKey, logf 
 // checked), so the firewall serves nothing, and a box that moves to
 // another cloud would leave it behind. The next create makes it again. A
 // firewall that was there before, or that is attached to anything, stays
-// as it is. made says whether this Create made it. It returns what is
-// left, as a sentence.
+// as it is; only an unattached one is worth deleting by hand. made says
+// whether this Create made it. It returns what is left, as a sentence.
 func removeUnusedFirewall(ctx context.Context, cl *Client, box string, made bool, logf func(string, ...any)) string {
 	const key = "; your SSH key stays in the project for the next try"
 	name := FirewallName(box)
 	stays := func(why string) string {
 		return fmt.Sprintf("No server was created. The firewall %s stays (%s), free of charge; should %s move to another cloud, delete it in the Hetzner Console (Firewalls)%s",
 			name, why, box, key)
-	}
-	if !made {
-		return stays("it was there before this create")
 	}
 	ctx = context.WithoutCancel(ctx)
 	f, err := FindFirewall(ctx, cl, box)
@@ -143,10 +140,12 @@ func removeUnusedFirewall(ctx context.Context, cl *Client, box string, made bool
 		return stays("looking it up again failed: " + err.Error())
 	case f == nil:
 		return "No server was created" + key
+	case len(f.AppliedTo) > 0:
+		return fmt.Sprintf("No server was created. The firewall %s stays as it is: something is attached to it%s", name, key)
+	case !made:
+		return stays("it was there before this create")
 	case !managed(f, box):
 		return stays("it is not labelled for " + box)
-	case len(f.AppliedTo) > 0:
-		return stays("something is attached to it")
 	}
 	if err := cl.DeleteFirewall(ctx, f.ID); err != nil && !apiErr(err, "", 404) {
 		return stays("deleting it failed: " + err.Error())

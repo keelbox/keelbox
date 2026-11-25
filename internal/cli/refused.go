@@ -210,26 +210,31 @@ func notCreated(cfg *config.Config) bool {
 // markOrdering marks a cloud box keelbox up configured, and has created
 // no server for yet, as having its server ordered (on) or as not (off):
 // keelbox create does, for a box up configured. It reports whether the
-// box is such a box.
-func markOrdering(cfg *config.Config, on bool) bool {
+// box is such a box, and fails when the mark cannot be written.
+func markOrdering(cfg *config.Config, on bool) (bool, error) {
 	st, ok := loadUpState(cfg)
 	if !ok || !isCloud(st.Via) || st.Stage != stageConfigured || st.Address != "" {
-		return false
+		return false, nil
 	}
 	if st.Applying != on {
 		st.Applying = on
-		_ = saveUpState(cfg.Box, st)
+		if err := saveUpState(cfg.Box, st); err != nil {
+			return true, err
+		}
 	}
-	return true
+	return true, nil
 }
 
-// forgetAnswers drops the answers up kept for a box that now has a
-// server: they were for creating it elsewhere.
-func forgetAnswers(cfg *config.Config) {
-	if st, ok := loadUpState(cfg); ok && st.Answers != nil {
-		st.Answers = nil
-		_ = saveUpState(cfg.Box, st)
+// recordServer notes in up's progress that the box up configured has its
+// server at ip, as up does when it creates it: keelbox up carries on from
+// there, and the answers kept for creating it elsewhere go.
+func recordServer(cfg *config.Config, ip string) error {
+	st, ok := loadUpState(cfg)
+	if !ok {
+		return nil
 	}
+	st.Address, st.Bootstrap, st.Stage, st.Applying, st.Answers = ip, bootstrapUser(st.Via), stageServer, true, nil
+	return saveUpState(cfg.Box, st)
 }
 
 // cloudAnswers are the answers that hold for one cloud only: they are not
@@ -264,51 +269,70 @@ func (w *wizard) keptAnswers() map[string]string {
 // not created yet: they change where it is created. Elsewhere they change
 // nothing, and ignoredFlags says so. --provider naming the box's own cloud
 // changes nothing either, and is taken without a word. Each is checked
-// against Hetzner's lists before the config changes.
-func (w *wizard) placeAgain(ctx context.Context, cfg *config.Config) error {
+// against Hetzner's lists before the config changes, and so is the price:
+// one other than the go-ahead showed is asked about again (--yes without a
+// terminal). It reports false when the user declines it.
+func (w *wizard) placeAgain(ctx context.Context, cfg *config.Config) (bool, error) {
 	if w.o.set["provider"] && w.o.provider == cfg.Target.Provider {
 		delete(w.o.set, "provider")
 	}
 	if cfg.Target.Provider != config.ProviderHetzner || !w.o.set["location"] && !w.o.set["size"] {
-		return nil
+		return true, nil
 	}
-	box, path := cfg.Box, boxConfigPath(cfg.Box)
+	box, path, h := cfg.Box, boxConfigPath(cfg.Box), cfg.Target.Hetzner
+	failed := func(err error) error {
+		return fmt.Errorf("nothing changed; %v. Try again: %s", err, w.upCommand(nil))
+	}
 	cl, err := hetznerClient(ctx, cfg, w.o, w.p, w.out)
 	if err != nil {
-		return err
+		return false, failed(err)
 	}
-	loc := cfg.Target.Hetzner.Location
+	types, err := cl.ServerTypes(ctx)
+	if err != nil {
+		return false, failed(err)
+	}
+	// The ways on a refusal of the box as it is configured would offer:
+	// the examples below suggest them before anything else.
+	was := hetzner.NewRefusedError(nil, box, h.Location, h.ServerType, types, "")
+	loc, size := h.Location, h.ServerType
 	if w.o.set["location"] {
 		locs, err := cl.Locations(ctx)
 		if err != nil {
-			return err
+			return false, failed(err)
 		}
-		var names []string
+		var names, others []string
 		for _, l := range locs {
 			names = append(names, l.Name)
+			if l.Name != h.Location {
+				others = append(others, l.Name)
+			}
 		}
 		if !contains(names, w.o.location) {
-			return fmt.Errorf("--location %q is not a Hetzner location; use one of: %s, for example: keelbox up %s --location %s",
-				w.o.location, strings.Join(names, ", "), box, firstNonEmpty(append(names, "fsn1")...))
+			ex := firstNonEmpty(append(append(append([]string(nil), was.OtherLocations...), others...), "fsn1")...)
+			return false, fmt.Errorf("--location %q is not a Hetzner location; use one of: %s, for example: %s",
+				w.o.location, strings.Join(names, ", "), w.upCommand(map[string]string{"location": ex}))
 		}
 		loc = w.o.location
 	}
 	if w.o.set["size"] {
-		types, err := cl.ServerTypes(ctx)
-		if err != nil {
-			return err
-		}
 		if _, ok := hetzner.TypeNamed(types, w.o.size); !ok {
-			var names []string
+			var names, others []string
 			for _, o := range hetzner.Offers(types, loc) {
 				names = append(names, o.Type.Name)
+				if o.Type.Name != h.ServerType {
+					others = append(others, o.Type.Name)
+				}
 			}
-			if len(names) == 0 {
-				return fmt.Errorf("--size %q is not a Hetzner server type, and none can be ordered in %s now; try another location: keelbox up %s --location LOCATION", w.o.size, loc, box)
+			near := hetzner.NewRefusedError(nil, box, loc, h.ServerType, types, "").OtherTypes
+			ex := firstNonEmpty(append(near, others...)...)
+			if ex == "" {
+				return false, fmt.Errorf("--size %q is not a Hetzner server type, and no other can be ordered in %s now; try another location: %s",
+					w.o.size, loc, w.upCommand(map[string]string{"location": "LOCATION", "size": ""}))
 			}
-			return fmt.Errorf("--size %q is not a Hetzner server type; use one that can be ordered in %s now: %s, for example: keelbox up %s --size %s",
-				w.o.size, loc, strings.Join(names, ", "), box, names[0])
+			return false, fmt.Errorf("--size %q is not a Hetzner server type; use one that can be ordered in %s now: %s, for example: %s",
+				w.o.size, loc, strings.Join(names, ", "), w.upCommand(map[string]string{"size": ex}))
 		}
+		size = w.o.size
 	}
 	var keys []string
 	for _, f := range []struct{ flag, key, value string }{
@@ -320,7 +344,10 @@ func (w *wizard) placeAgain(ctx context.Context, cfg *config.Config) error {
 		}
 	}
 	if err := w.noServerYet(ctx, cfg, w.upCommand(nil), "set "+strings.Join(keys, " and ")+" in "+tildePath(path)+", then: keelbox up "+box); err != nil {
-		return err
+		return false, err
+	}
+	if ok, err := w.newPrice(types, h.ServerType, h.Location, size, loc); !ok || err != nil {
+		return false, err
 	}
 	for _, f := range []struct{ flag, key, value string }{
 		{"location", "target.hetzner.location", w.o.location},
@@ -330,11 +357,56 @@ func (w *wizard) placeAgain(ctx context.Context, cfg *config.Config) error {
 			continue
 		}
 		if err := w.setPlace(cfg, path, f.key, f.value); err != nil {
-			return fmt.Errorf("--%s %q: %v; set %s in %s yourself, then: keelbox up %s", f.flag, f.value, err, f.key, tildePath(path), box)
+			return false, fmt.Errorf("--%s %q: %v; set %s in %s yourself, then: keelbox up %s", f.flag, f.value, err, f.key, tildePath(path), box)
 		}
 		delete(w.o.set, f.flag) // taken: not one of the flags that change nothing
 	}
-	return nil
+	return true, nil
+}
+
+// monthly is a Hetzner type's monthly price in a location, and whether
+// it can be ordered there.
+func monthly(types []hetzner.ServerType, size, location string) (float64, bool) {
+	for _, o := range hetzner.Offers(types, location) {
+		if o.Type.Name == size {
+			return o.Monthly, true
+		}
+	}
+	return 0, false
+}
+
+// newPrice says what the box costs as size in loc, against wasSize in
+// wasLoc, which the go-ahead showed. The same price carries on; another
+// is asked about on a terminal, and needs --yes without one. A size not
+// sold there carries on: Hetzner's list refuses it before any order. It
+// reports false when the user declines.
+func (w *wizard) newPrice(types []hetzner.ServerType, wasSize, wasLoc, size, loc string) (bool, error) {
+	now, ok := monthly(types, size, loc)
+	if !ok {
+		return true, nil
+	}
+	before, shown := monthly(types, wasSize, wasLoc)
+	if shown && fmt.Sprintf("%.2f", before) == fmt.Sprintf("%.2f", now) {
+		w.logf("%s in %s costs about EUR %.2f a month, as before", size, loc, now)
+		return true, nil
+	}
+	was := ""
+	if shown {
+		was = fmt.Sprintf(", against EUR %.2f for %s in %s", before, wasSize, wasLoc)
+	}
+	w.logf("%s in %s costs about EUR %.2f a month%s, billed by Hetzner until keelbox destroy %s", size, loc, now, was, w.box)
+	if w.o.yes {
+		return true, nil
+	}
+	if !w.p.Interactive() {
+		return false, w.needFlag(fmt.Sprintf("the go-ahead at the new price (about EUR %.2f a month)", now), "--yes", w.upCommand(map[string]string{"yes": "true"}))
+	}
+	ok, err := w.p.Confirm(fmt.Sprintf("Create the server as %s in %s (about EUR %.2f a month until you destroy it)?", size, loc, now), true)
+	if err != nil || ok {
+		return ok, err
+	}
+	w.logf("nothing changed; %s stays %s in %s, with no server. To create it there later: %s", w.box, wasSize, wasLoc, w.upCommand(map[string]string{"yes": "true"}))
+	return false, nil
 }
 
 // noServerYet checks, before up moves a box to another cloud or changes
@@ -353,10 +425,7 @@ func (w *wizard) noServerYet(ctx context.Context, cfg *config.Config, again, els
 		srv, err = cl.find(ctx)
 		switch {
 		case err == nil:
-			if st, ok := loadUpState(cfg); ok {
-				st.Address, st.Bootstrap, st.Stage, st.Applying, st.Answers = srv.ip, bootstrapUser(st.Via), stageServer, true, nil
-				_ = saveUpState(box, st)
-			}
+			_ = recordServer(cfg, srv.ip) // the error below stops the change either way
 			return fmt.Errorf("%s has a server on %s after all, %s, which keelbox created; a box has one server, so nothing changed. Set it up there: keelbox up %s. "+
 				"Or delete it first: keelbox destroy %s, then %s", box, at, srv.about, box, box, elsewhere)
 		case provider.NoServer(err):

@@ -120,12 +120,21 @@ func TestUpHetznerRefusedWithoutATerminal(t *testing.T) {
 		t.Errorf("forget would say a server may exist: %+v", plan)
 	}
 	// A location Hetzner does not have is refused before anything changes.
-	if code, out := upWith(t, r, nil, "up", "acme", "--location", "mars1"); code != 2 || !strings.Contains(out, `--location "mars1" is not a Hetzner location; use one of: fsn1, ash, for example: keelbox up acme --location fsn1`) {
+	if code, out := upWith(t, r, nil, "up", "acme", "--location", "mars1"); code != 2 || !strings.Contains(out, `--location "mars1" is not a Hetzner location; use one of: fsn1, ash, for example: keelbox up acme --location ash`) {
 		t.Errorf("exit %d\n%s", code, out)
 	}
 
-	// Another location, as printed; --provider naming the same cloud changes nothing.
+	// Another location, as printed: it costs more, so up says so and
+	// stops for --yes; --provider naming the same cloud changes nothing.
 	code, out := upWith(t, r, nil, "up", "acme", "--provider", "hetzner", "--location", "ash")
+	const more = "cx23 in ash costs about EUR 5.49 a month, against EUR 3.79 for cx23 in fsn1, billed by Hetzner until keelbox destroy acme"
+	if code != 2 || !strings.Contains(out, more) || !strings.HasSuffix(strings.TrimSpace(flat(out)), "pass --yes, for example: keelbox up acme --location ash --yes") || len(r.calls) != 0 {
+		t.Fatalf("exit %d, calls %v\n%s", code, r.calls, out)
+	}
+	if cfg := mustLoad(t, "acme"); cfg.Target.Hetzner.Location != "fsn1" {
+		t.Fatalf("changed before the go-ahead: %+v", cfg.Target.Hetzner)
+	}
+	code, out = upWith(t, r, nil, "up", "acme", "--provider", "hetzner", "--location", "ash", "--yes")
 	cfg, st := loadBox(t, "acme")
 	if code != 0 || cfg.Target.Hetzner.Location != "ash" || cfg.Target.Hetzner.ServerType != "cx23" || !strings.HasPrefix(strings.Join(r.calls, "; "), "create acme") {
 		t.Fatalf("exit %d, %+v, calls %v\n%s", code, cfg.Target.Hetzner, r.calls, out)
@@ -141,7 +150,10 @@ func TestUpHetznerRefusedWithoutATerminal(t *testing.T) {
 // Another size, as printed.
 func TestUpRefusedSizeAsPrinted(t *testing.T) {
 	r, _ := refusedBox(t, forbidden)
-	code, out := upWith(t, r, nil, "up", "acme", "--size", "cpx22")
+	if code, out := upWith(t, r, nil, "up", "acme", "--size", "cpx22"); code != 2 || !strings.HasSuffix(strings.TrimSpace(flat(out)), "keelbox up acme --size cpx22 --yes") {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	code, out := upWith(t, r, nil, "up", "acme", "--size", "cpx22", "--yes")
 	cfg, _ := loadBox(t, "acme")
 	if code != 0 || cfg.Target.Hetzner.ServerType != "cpx22" || cfg.Target.Hetzner.Location != "fsn1" || !strings.HasPrefix(strings.Join(r.calls, "; "), "create acme") {
 		t.Fatalf("exit %d, %+v, calls %v\n%s", code, cfg.Target.Hetzner, r.calls, out)
@@ -554,7 +566,7 @@ func TestUpRefusedBoxWithAServerAfterAll(t *testing.T) {
 func TestUpRefusedMistypedSize(t *testing.T) {
 	r, _ := refusedBox(t, forbidden)
 	code, out := upWith(t, r, nil, "up", "acme", "--size", "cpx222")
-	if code != 2 || !strings.Contains(flat(out), `--size "cpx222" is not a Hetzner server type; use one that can be ordered in fsn1 now: cx23, cax11, cpx02, cpx22, ccx13, for example: keelbox up acme --size cx23`) {
+	if code != 2 || !strings.Contains(flat(out), `--size "cpx222" is not a Hetzner server type; use one that can be ordered in fsn1 now: cx23, cax11, cpx02, cpx22, ccx13, for example: keelbox up acme --size cpx22`) {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
 	if cfg := mustLoad(t, "acme"); cfg.Target.Hetzner.ServerType != "cx23" || !notCreated(cfg) || len(r.calls) != 0 {
@@ -629,5 +641,89 @@ func TestUpRefusedMoveInTheSameRunAsksTheGoAheadAgain(t *testing.T) {
 	}
 	if cfg := mustLoad(t, "acme"); cfg.Target.Provider != config.ProviderHetzner || len(r.calls) != 1 {
 		t.Errorf("target %+v, calls %v", cfg.Target, r.calls)
+	}
+}
+
+// On a terminal, a new price is asked about before the config changes;
+// the same price carries on without a question.
+func TestUpRefusedNewPlaceAsksAboutThePrice(t *testing.T) {
+	t.Run("declined", func(t *testing.T) {
+		r, _ := refusedBox(t, forbidden)
+		code, out := upWith(t, r, script("n"), "up", "acme", "--location", "ash", "--size", "cpx02")
+		if code != 0 || !strings.Contains(out, "Create the server as cpx02 in ash (about EUR 6.49 a month until you destroy it)?") ||
+			!strings.Contains(out, "nothing changed; acme stays cx23 in fsn1, with no server. To create it there later: keelbox up acme --location ash --size cpx02 --yes") || len(r.calls) != 0 {
+			t.Fatalf("exit %d, calls %v\n%s", code, r.calls, out)
+		}
+		if cfg := mustLoad(t, "acme"); cfg.Target.Hetzner.Location != "fsn1" || cfg.Target.Hetzner.ServerType != "cx23" || !notCreated(cfg) {
+			t.Errorf("target %+v", cfg.Target.Hetzner)
+		}
+	})
+	t.Run("accepted", func(t *testing.T) {
+		r, _ := refusedBox(t, forbidden)
+		code, out := upWith(t, r, script(""), "up", "acme", "--location", "ash", "--size", "cpx02")
+		if cfg := mustLoad(t, "acme"); code != 0 || cfg.Target.Hetzner.Location != "ash" || cfg.Target.Hetzner.ServerType != "cpx02" || !strings.HasPrefix(strings.Join(r.calls, "; "), "create acme") {
+			t.Fatalf("exit %d, target %+v\n%s", code, cfg.Target.Hetzner, out)
+		}
+	})
+	t.Run("same price", func(t *testing.T) {
+		r, _ := refusedBox(t, forbidden)
+		code, out := upWith(t, r, nil, "up", "acme", "--size", "cax11")
+		if cfg := mustLoad(t, "acme"); code != 0 || cfg.Target.Hetzner.ServerType != "cax11" || !strings.Contains(out, "cax11 in fsn1 costs about EUR 3.79 a month, as before") {
+			t.Fatalf("exit %d, target %+v\n%s", code, cfg.Target.Hetzner, out)
+		}
+	})
+}
+
+// A failed lookup in Hetzner's lists changes nothing and says how to try
+// again.
+func TestUpRefusedPlaceLookupFails(t *testing.T) {
+	r, _, api := refusedBoxOn(t, forbidden)
+	api.Fail = map[string]bool{"list_server_types": true}
+	code, out := upWith(t, r, nil, "up", "acme", "--size", "cpx22")
+	if code != 2 || !strings.HasPrefix(strings.TrimSpace(flat(out)), "keelbox up: nothing changed; hetzner api: 500") || !strings.HasSuffix(strings.TrimSpace(flat(out)), "Try again: keelbox up acme --size cpx22") {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+}
+
+// keelbox create orders nothing when it cannot note the order in up's
+// progress: the box would otherwise look movable with a server.
+func TestCreateByHandStopsWhenTheMarkCannotBeWritten(t *testing.T) {
+	_, _, api := refusedBoxOn(t, forbidden)
+	if err := os.Chmod(upStatePath("acme"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(upStatePath("acme"), 0o600) })
+	cfg := mustLoad(t, "acme")
+	var out strings.Builder
+	code := cloudCreate(context.Background(), &hetznerCloud{cl: newHetznerClient(goodToken), cfg: cfg}, cfg, options{}, t.Logf, &out, &out)
+	text := flat(out.String())
+	if code != 1 || !strings.Contains(text, "nothing was ordered: keelbox could not note in ~/.config/keelbox/boxes/acme.up.json that acme's server is being created") ||
+		!strings.HasSuffix(strings.TrimSpace(text), "Make it writable, then: keelbox create acme") {
+		t.Fatalf("exit %d\n%s", code, text)
+	}
+	for _, c := range api.Calls() {
+		if c == "POST /servers" {
+			t.Errorf("ordered: %v", api.Calls())
+		}
+	}
+}
+
+// A server keelbox create made for a box up configured is noted, and
+// keelbox up carries on with it instead of creating another.
+func TestCreateByHandRecordsTheServer(t *testing.T) {
+	r, _ := refusedBox(t, forbidden)
+	cfg := mustLoad(t, "acme")
+	if ok, err := markOrdering(cfg, true); !ok || err != nil {
+		t.Fatalf("%v %v", ok, err)
+	}
+	if err := recordServer(cfg, "203.0.113.7"); err != nil {
+		t.Fatal(err)
+	}
+	if _, st := loadBox(t, "acme"); st.Stage != stageServer || st.Address != "203.0.113.7" || st.Answers != nil || notCreated(cfg) {
+		t.Fatalf("state %+v", st)
+	}
+	code, out := upWith(t, r, nil, "up", "acme")
+	if code != 0 || strings.Contains(strings.Join(r.calls, "; "), "create acme") || !strings.Contains(strings.Join(r.calls, "; "), "apply acme") {
+		t.Fatalf("exit %d, calls %v\n%s", code, r.calls, out)
 	}
 }

@@ -46,7 +46,8 @@ type API struct {
 	Created []map[string]any
 	// Fail makes a call answer a server error: shutdown, poweron,
 	// change_type, create_image, delete_server, delete_image,
-	// create_server, list_firewalls or delete_firewall.
+	// create_server, list_firewalls, delete_firewall or
+	// list_server_types.
 	Fail map[string]bool
 	// OnCall, when set, sees each request as "METHOD /path" before the
 	// fake answers it, and may change the fake's fields (it runs with the
@@ -297,6 +298,8 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch p := r.URL.Path; {
+	case p == "/server_types" && a.Fail["list_server_types"]:
+		fail(500, "server_error", "the fake was told to fail list_server_types")
 	case p == "/server_types":
 		send(map[string]any{"server_types": ServerTypes(), "meta": page})
 	case p == "/locations":

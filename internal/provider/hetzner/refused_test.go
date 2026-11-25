@@ -80,7 +80,7 @@ func TestCreateRefusedLeavesAFirewallItDidNotMake(t *testing.T) {
 	a.Firewalls = []map[string]any{hetznertest.Firewall(7, "acme", 42)}
 	a.Refuse = map[string]hetznertest.Error{"create_server": refusals[0]}
 	_, err := Create(context.Background(), cl, boxConfig(t, "ubuntu-26.04"), testHostKey, t.Logf)
-	want := "No server was created. The firewall keelbox-acme stays (it was there before this create), free of charge; should acme move to another cloud, delete it in the Hetzner Console (Firewalls); your SSH key stays in the project for the next try"
+	want := "No server was created. The firewall keelbox-acme stays as it is: something is attached to it; your SSH key stays in the project for the next try"
 	if err == nil || !strings.HasSuffix(err.Error(), want) {
 		t.Fatalf("got %v", err)
 	}
@@ -94,6 +94,20 @@ func TestCreateRefusedLeavesAFirewallItDidNotMake(t *testing.T) {
 	}
 }
 
+// A firewall that was there before, with nothing attached, stays too; the
+// message says where to delete it.
+func TestCreateRefusedLeavesAnUnattachedFirewallItDidNotMake(t *testing.T) {
+	cl, a := fake(t)
+	a.Keys = []hetznertest.Key{{ID: 7, Name: "laptop"}}
+	a.Firewalls = []map[string]any{hetznertest.Firewall(7, "acme")}
+	a.Refuse = map[string]hetznertest.Error{"create_server": refusals[0]}
+	_, err := Create(context.Background(), cl, boxConfig(t, "ubuntu-26.04"), testHostKey, t.Logf)
+	want := "No server was created. The firewall keelbox-acme stays (it was there before this create), free of charge; should acme move to another cloud, delete it in the Hetzner Console (Firewalls); your SSH key stays in the project for the next try"
+	if err == nil || !strings.HasSuffix(err.Error(), want) || len(a.Firewalls) != 1 {
+		t.Fatalf("got %v, firewalls %v", err, a.Firewalls)
+	}
+}
+
 // The firewall this create made stays when it cannot be shown to be
 // unused, and the message says why.
 func TestCreateRefusedKeepsItsFirewallWhenUnsure(t *testing.T) {
@@ -102,7 +116,7 @@ func TestCreateRefusedKeepsItsFirewallWhenUnsure(t *testing.T) {
 		name, why string
 		onRefuse  func(a *hetznertest.API)
 	}{
-		{"attached", "something is attached to it", func(a *hetznertest.API) {
+		{"attached", "", func(a *hetznertest.API) {
 			a.Firewalls[0]["applied_to"] = []any{map[string]any{"type": "server", "server": map[string]any{"id": 99}}}
 		}},
 		{"lookup fails", "looking it up again failed: ", func(a *hetznertest.API) { a.Fail = map[string]bool{"list_firewalls": true} }},
@@ -123,7 +137,12 @@ func TestCreateRefusedKeepsItsFirewallWhenUnsure(t *testing.T) {
 				t.Fatalf("not a refusal: %v", err)
 			}
 			msg := err.Error()
-			if !strings.Contains(msg, "No server was created. The firewall keelbox-acme stays ("+c.why) || !strings.HasSuffix(msg, tail) {
+			ok := strings.Contains(msg, "No server was created. The firewall keelbox-acme stays ("+c.why) && strings.HasSuffix(msg, tail)
+			if c.why == "" {
+				// Not to be deleted by hand: it is in use.
+				ok = strings.HasSuffix(msg, "No server was created. The firewall keelbox-acme stays as it is: something is attached to it; your SSH key stays in the project for the next try")
+			}
+			if !ok {
 				t.Errorf("got %s", msg)
 			}
 			if len(a.Firewalls) != 1 {

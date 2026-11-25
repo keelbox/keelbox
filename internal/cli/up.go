@@ -485,8 +485,12 @@ func (w *wizard) up(ctx context.Context, pos []string) (int, error) {
 				if w.o.set["provider"] && w.o.provider != cfg.Target.Provider {
 					return w.moveCloud(ctx, name, cfg)
 				}
-				if err := w.placeAgain(ctx, cfg); err != nil {
+				ok, err := w.placeAgain(ctx, cfg)
+				if err != nil {
 					return 2, err
+				}
+				if !ok {
+					return 0, nil // declined the new price; placeAgain said so
 				}
 			}
 			return w.carryOn(ctx, cfg, st)

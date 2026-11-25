@@ -509,13 +509,23 @@ func cloudCreate(ctx context.Context, cl cloud, cfg *config.Config, o options, l
 	}
 	// A box keelbox up configured, created here instead: from the order
 	// on, it is no longer one whose cloud may change (notCreated).
-	ordering := o.hooks == nil && boxRef(cfg, o.configFile) == cfg.Box && markOrdering(cfg, true)
+	ordering := false
+	if o.hooks == nil && boxRef(cfg, o.configFile) == cfg.Box {
+		var err error
+		if ordering, err = markOrdering(cfg, true); err != nil {
+			failf(stderr, "nothing was ordered: keelbox could not note in %s that %s's server is being created (%v). Make it writable, then: keelbox create %s\n",
+				tildePath(upStatePath(cfg.Box)), cfg.Box, err, cfg.Box)
+			return 1
+		}
+	}
 	srv, err := cl.create(ctx, provider.HostKeyPair{Private: priv, Public: pub}, logf)
 	var refused *cloudRefusal
 	if errors.As(err, &refused) || provider.NotOrdered(err) {
 		// Certain that nothing was created: where it is may still change.
 		if ordering {
-			markOrdering(cfg, false)
+			// Unwritten, the box stays marked as ordering: it does not
+			// move, which is the safe side.
+			_, _ = markOrdering(cfg, false)
 		}
 		o.hooks.notOrdered()
 	}
@@ -535,7 +545,10 @@ func cloudCreate(ctx context.Context, cl cloud, cfg *config.Config, o options, l
 	// The box has a server again.
 	forgetDestroyedMark(cfg.Box)
 	if ordering {
-		forgetAnswers(cfg)
+		// keelbox up carries on with this server, not another create.
+		if err := recordServer(cfg, srv.ip); err != nil {
+			notef(stderr, "could not note %s's server in %s (%v); keelbox up %s would try to create it again: run keelbox apply %s instead", cfg.Box, tildePath(upStatePath(cfg.Box)), err, cfg.Box, cfg.Box)
+		}
 	}
 	ip := addr{srv.ip, cfg.Target.SSH.Port}
 	o.hooks.server(ip.host)
