@@ -370,6 +370,9 @@ func (w *wizard) carryOn(ctx context.Context, cfg *config.Config, st upState) (i
 	var mv *movingCloud
 	if errors.As(err, &mv) {
 		w.o.provider = mv.via
+		if w.o.set == nil {
+			w.o.set = map[string]bool{}
+		}
 		w.o.set["provider"] = true
 		return w.moveCloud(ctx, cfg.Box, cfg)
 	}
