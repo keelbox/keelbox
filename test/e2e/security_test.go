@@ -47,11 +47,13 @@ func securityChecks(t *testing.T, host, cfg string) {
 	// makes only at the first SSH connection after a boot. Doctor then
 	// reads sshd's config in a mount namespace of its own: the checks pass
 	// and the box's /run is left as it was. The directory is moved aside
-	// for the one command and put back whatever happens.
-	sshdOut := must(t, host, "admin", `sudo sh -c 'mv /run/sshd /run/sshd.kb-e2e && trap "mv /run/sshd.kb-e2e /run/sshd" EXIT; `+
+	// for the one command and put back whatever happens: the command runs
+	// as a unit of its own, so it finishes even if this SSH session ends,
+	// and no new SSH connection is refused for longer than it takes.
+	sshdOut := must(t, host, "admin", `sudo systemd-run --quiet --wait --pipe --collect /bin/sh -c 'mv /run/sshd /run/sshd.kb-e2e && trap "mv /run/sshd.kb-e2e /run/sshd" EXIT HUP INT TERM; `+
 		`before=$(findmnt -n -o SOURCE,FSTYPE,OPTIONS /run); keelbox doctor --local /etc/keelbox/keelbox.yaml 2>&1; `+
 		`test -e /run/sshd && echo sshd-dir-made; [ "$before" = "$(findmnt -n -o SOURCE,FSTYPE,OPTIONS /run)" ] && echo run-unchanged'`, "run-unchanged")
-	if strings.Contains(sshdOut, "sshd -T failed") || strings.Contains(sshdOut, "sshd-dir-made") || !strings.Contains(sshdOut, "passwordauthentication no") {
+	if strings.Contains(sshdOut, "sshd -T failed") || strings.Contains(sshdOut, "sshd-dir-made") || !strings.Contains(sshdOut, "passwordauthentication no") || !strings.Contains(sshdOut, "ssh-agent-forwarding") {
 		t.Errorf("doctor without /run/sshd:\n%s", sshdOut)
 	} else {
 		logf(t, "PASS doctor reads sshd's config before the first SSH connection after a boot, and leaves /run as it was")

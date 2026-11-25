@@ -2,6 +2,7 @@ package system
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -21,7 +22,12 @@ func SSHDConfig(ctx context.Context, x Executor, args ...string) (string, error)
 	out, ferr := Output(ctx, x, C("unshare", append([]string{"--mount", "--propagation", "private", "--", "/bin/sh", "-c",
 		`mount -t tmpfs -o mode=0755 keelbox-check /run && mkdir -m 0755 /run/sshd && exec sshd -T "$@"`, "sh"}, args...)...))
 	if ferr != nil {
-		why, _, _ := strings.Cut(strings.TrimSpace(ferr.Error()), "\n")
+		why := ferr.Error()
+		var ee *ExitError
+		if errors.As(ferr, &ee) && strings.TrimSpace(ee.Result.Stderr) != "" {
+			why = ee.Result.Stderr
+		}
+		why, _, _ = strings.Cut(strings.TrimSpace(why), "\n")
 		return "", fmt.Errorf("%w; reading it in a mount namespace of its own failed too (%s). Start sshd, which makes the directory: sudo systemctl start ssh.service", err, why)
 	}
 	return out, nil

@@ -33,7 +33,8 @@ func TestSSHDConfigWithoutRunSSHD(t *testing.T) {
 	x.On("sshd -T", Result{ExitCode: 255, Stderr: "Missing privilege separation directory: /run/sshd\n"})
 	x.On("unshare", Result{ExitCode: 1, Stderr: "unshare: unshare failed: Operation not permitted\n"})
 	_, err = SSHDConfig(context.Background(), x)
-	if err == nil || !strings.Contains(err.Error(), "Missing privilege separation directory") || !strings.HasSuffix(err.Error(), "sudo systemctl start ssh.service") {
+	if err == nil || !strings.Contains(err.Error(), "Missing privilege separation directory") || !strings.HasSuffix(err.Error(), "sudo systemctl start ssh.service") ||
+		!strings.Contains(err.Error(), "(unshare: unshare failed: Operation not permitted)") || strings.Contains(err.Error(), "mount -t tmpfs") {
 		t.Errorf("fallback failed: %v", err)
 	}
 }
