@@ -259,9 +259,6 @@ func Restart(ctx context.Context, e *engine.Env, why string, now time.Time) erro
 // start removes it, at every boot. Only root can write /run.
 const ShutdownSavedPath = "/run/keelbox-tmux-saved"
 
-// saved is what the shutdown save prints once resurrect's save succeeded.
-const saved = "keelbox-tmux-saved"
-
 // saveSessionsNow has tmux-resurrect save the agent's sessions now, while
 // every pane runs. With no server, the save is skipped: resurrect would
 // write an empty save and point its last at it, so the boot would restore
@@ -283,14 +280,12 @@ func saveSessionsNow(ctx context.Context, e *engine.Env, atShutdown bool) error 
 		_, err := bounded(ctx, e.X, system.As(agent.Name, script, "quiet"))
 		return err
 	}
-	save := system.As(agent.Name, "tmux", "run-shell", "'"+script+"' quiet && echo "+saved)
+	// run-shell without -b waits and exits with the command's status
+	// (tmux 3.4 and later); on 3.4 it prints nothing of its output.
+	save := system.As(agent.Name, "tmux", "run-shell", "'"+script+"' quiet")
 	save.NoScope = true
-	out, err := bounded(ctx, e.X, save)
-	if err != nil {
+	if _, err := bounded(ctx, e.X, save); err != nil {
 		return err
 	}
-	if !strings.Contains(out, saved) {
-		return fmt.Errorf("tmux-resurrect's save did not finish: %s", oneLine(out))
-	}
-	return e.X.WriteFile(ShutdownSavedPath, []byte(saved+"\n"), 0o644, "root", "root")
+	return e.X.WriteFile(ShutdownSavedPath, []byte("saved\n"), 0o644, "root", "root")
 }

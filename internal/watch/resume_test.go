@@ -157,7 +157,7 @@ func TestNoteAtShutdown(t *testing.T) {
 		b.OK("ps -u agent", "  100     1 -bash\n  101   100 claude --model opus\n")
 		writeClaudeSession(t, b, 101, `{"sessionId":"`+sessionID+`"}`)
 		b.OK("(as agent) tmux has-session", "")
-		b.OK("(as agent) tmux run-shell", "keelbox-tmux-saved\n")
+		b.OK("(as agent) tmux run-shell", "")
 		return b
 	}
 	ctx := context.Background()
@@ -171,7 +171,7 @@ func TestNoteAtShutdown(t *testing.T) {
 		t.Errorf("noted %+v", r)
 	}
 
-	for _, c := range []string{"(as agent) tmux list-panes", "(as agent) tmux has-session", "(as agent) tmux run-shell '/home/agent/.tmux/plugins/tmux-resurrect/scripts/save.sh' quiet && echo keelbox-tmux-saved"} {
+	for _, c := range []string{"(as agent) tmux list-panes", "(as agent) tmux has-session", "(as agent) tmux run-shell '/home/agent/.tmux/plugins/tmux-resurrect/scripts/save.sh' quiet"} {
 		if l := lastCall(b, c); l.Name == "" || !l.NoScope {
 			t.Errorf("%s: not run, or in a scope at shutdown, which systemd refuses: %+v", c, l)
 		}
