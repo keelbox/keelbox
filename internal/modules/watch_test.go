@@ -101,7 +101,8 @@ func TestConversationsUnit(t *testing.T) {
 	unit := s.content(unitDir + ConversationsUnit)
 	for _, want := range []string{
 		"Type=oneshot\nRemainAfterExit=yes",
-		"ExecStart=/bin/true\n",
+		"ExecStart=/bin/rm -f /run/keelbox-tmux-saved\n",
+		"Before=keelbox-watch.service\n",
 		"ExecStop=-/usr/local/bin/keelbox note-conversations --local /etc/keelbox/keelbox.yaml\n",
 		"RequiresMountsFor=/var/lib/keelbox/watch",
 		"WantedBy=multi-user.target",

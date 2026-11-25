@@ -156,6 +156,8 @@ func TestNoteAtShutdown(t *testing.T) {
 		b.OK("(as agent) tmux list-panes", "main:1.1\t100\t/home/agent/app\n")
 		b.OK("ps -u agent", "  100     1 -bash\n  101   100 claude --model opus\n")
 		writeClaudeSession(t, b, 101, `{"sessionId":"`+sessionID+`"}`)
+		b.OK("(as agent) tmux has-session", "")
+		b.OK("(as agent) tmux run-shell", "keelbox-tmux-saved\n")
 		return b
 	}
 	ctx := context.Background()
@@ -169,10 +171,26 @@ func TestNoteAtShutdown(t *testing.T) {
 		t.Errorf("noted %+v", r)
 	}
 
-	for _, c := range []string{"(as agent) tmux list-panes", "(as agent) tmux has-session", "(as agent) /home/agent/.tmux/plugins/tmux-resurrect/scripts/save.sh quiet"} {
+	for _, c := range []string{"(as agent) tmux list-panes", "(as agent) tmux has-session", "(as agent) tmux run-shell '/home/agent/.tmux/plugins/tmux-resurrect/scripts/save.sh' quiet && echo keelbox-tmux-saved"} {
 		if l := lastCall(b, c); l.Name == "" || !l.NoScope {
 			t.Errorf("%s: not run, or in a scope at shutdown, which systemd refuses: %+v", c, l)
 		}
+	}
+	// The save ran inside the tmux server, and is marked so the tmux
+	// unit's own save at its stop is skipped.
+	if _, err := b.e.X.ReadFile(ShutdownSavedPath); err != nil {
+		t.Errorf("the save at shutdown is not marked: %v", err)
+	}
+
+	// A save that did not finish leaves no mark: the tmux unit saves as
+	// before.
+	b = setup(t, "", "stopping")
+	b.On("(as agent) tmux run-shell", system.Result{Stdout: "'save.sh quiet' returned 1\n", ExitCode: 1})
+	if got := NoteAtShutdown(ctx, b.e, night); !strings.Contains(got, "saving the tmux sessions failed") {
+		t.Errorf("said %q", got)
+	}
+	if _, err := b.e.X.ReadFile(ShutdownSavedPath); err == nil {
+		t.Error("a failed save was marked")
 	}
 
 	// tmux cannot be asked: keelbox's own note, taken before its reboot,

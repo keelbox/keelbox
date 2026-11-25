@@ -130,7 +130,7 @@ host:
   # When the box restarts for an update that needs it: nightly between 01:00
   # and 06:00 once idle, weekly the same on Sunday night, never (you run
   # keelbox reboot {{.Box}}), or a time like "04:00", idle or not. After any
-  # reboot, Claude Code and Codex conversations in tmux open again.
+  # orderly reboot, Claude Code and Codex conversations in tmux open again.
   auto_reboot: {{q .AutoReboot}}
   firewall:
     enabled: true                      # UFW: deny inbound except SSH, tailscale0 and allow, Docker ports included

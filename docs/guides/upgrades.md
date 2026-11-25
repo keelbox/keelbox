@@ -24,7 +24,7 @@ Everything else moves only when you apply.
 
 ## Reboots
 
-Some updates take effect only after a reboot. `keelbox up` asks when the box may reboot for them: nightly (the default), weekly on Sunday night, or manually. Nightly and weekly reboots wait until the box has been [idle](../reference/config.md#auto_reboot) for 30 minutes. Programs in tmux stop; Claude Code and Codex reopen their conversations, after this reboot or any other. To reboot now, run `keelbox reboot acme`.
+Some updates take effect only after a reboot. `keelbox up` asks when the box may reboot for them: nightly (the default), weekly on Sunday night, or manually. Nightly and weekly reboots wait until the box has been [idle](../reference/config.md#auto_reboot) for 30 minutes. Programs in tmux stop; Claude Code and Codex reopen their conversations, after this reboot or any other orderly one (not after a crash or power loss). To reboot now, run `keelbox reboot acme`.
 
 ## The update check
 

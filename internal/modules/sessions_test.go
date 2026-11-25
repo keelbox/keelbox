@@ -18,7 +18,7 @@ func TestTmuxUnitChangeNeverRestartsTheServer(t *testing.T) {
 	}
 	path := "/home/agent/.config/systemd/user/" + tmuxService
 	unit := s.content(path)
-	if !strings.Contains(unit, "ExecStop=-/bin/sh -c 'tmux has-session 2>/dev/null || exit 0; exec /home/agent/.tmux/plugins/tmux-resurrect/scripts/save.sh'") {
+	if !strings.Contains(unit, "ExecStop=-/bin/sh -c '[ -e /run/keelbox-tmux-saved ] && exit 0; tmux has-session 2>/dev/null || exit 0; exec /home/agent/.tmux/plugins/tmux-resurrect/scripts/save.sh'") {
 		t.Errorf("tmux unit saves without a server:\n%s", unit)
 	}
 	// An older keelbox's unit text: the upgrade apply rewrites it and

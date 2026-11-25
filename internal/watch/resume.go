@@ -280,6 +280,10 @@ func noteConversations(ctx context.Context, e *engine.Env, now time.Time, atShut
 // so a later crash cannot resume conversations from long ago. It returns
 // what it did, for the journal.
 func NoteAtShutdown(ctx context.Context, e *engine.Env, now time.Time) string {
+	// Within the unit's TimeoutStopSec=30, so the line below reaches the
+	// journal even when tmux is slow to answer.
+	ctx, cancel := context.WithTimeout(ctx, shutdownDeadline)
+	defer cancel()
 	if !e.Cfg.TmuxRecovery() {
 		return "nothing noted: the tmux sessions are not restored (sessions.recovery is off)"
 	}
@@ -299,6 +303,9 @@ func NoteAtShutdown(ctx context.Context, e *engine.Env, now time.Time) string {
 	}
 	return msg
 }
+
+// shutdownDeadline bounds the note and the save at shutdown.
+const shutdownDeadline = 25 * time.Second
 
 // shells are what a restored pane runs before anything is typed into it.
 var shells = []string{"bash", "sh", "dash", "zsh", "fish"}

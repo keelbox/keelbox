@@ -388,25 +388,31 @@ exec -a claude sleep 86400
 FAKE
 chmod +x ~/kb-e2e-fake/claude && echo 'alias claude=~/kb-e2e-fake/claude # kb-e2e' >> ~/.bashrc && `+
 		`tmux new-session -d -s kb-resume -c /tmp && sleep 1 && tmux send-keys -t kb-resume 'claude --model opus' Enter && sleep 2 && cat ~/kb-e2e-claude-args`, "--model opus")
+	// A second window whose program outlives SIGTERM by a few seconds, as
+	// docker compose or a database in the foreground does. It keeps the
+	// tmux server up while the user manager stops, so the tmux unit's own
+	// save at its stop would run moments after keelbox's, and overwrite
+	// and delete it within the same second unless it skips.
+	must(t, host, "agent", `tmux new-window -d -t kb-resume -n kb-linger -c /tmp && tmux send-keys -t kb-resume:kb-linger "trap 'sleep 3; exit' TERM HUP; while :; do sleep 1; done" Enter && tmux list-windows -t kb-resume -F '#W'`, "kb-linger")
 	// At shutdown keelbox-conversations.service notes the pane before the
 	// agent's user manager stops, and tmux-resurrect saves the sessions.
 	return func() {
 		t.Helper()
 		deadline := time.Now().Add(5 * time.Minute)
 		for {
-			got, _ := sshRun(t, host, "agent", nil, "tmux has-session -t kb-resume 2>/dev/null && echo back; cat ~/kb-e2e-claude-args")
-			if strings.Contains(got, "back") && strings.Contains(got, "--resume "+fakeID) {
+			got, _ := sshRun(t, host, "agent", nil, "tmux has-session -t kb-resume 2>/dev/null && echo back; tmux list-windows -t kb-resume -F '#W' 2>/dev/null; cat ~/kb-e2e-claude-args")
+			if strings.Contains(got, "back") && strings.Contains(got, "kb-linger") && strings.Contains(got, "--resume "+fakeID) {
 				break
 			}
 			if time.Now().After(deadline) {
-				d, _ := sshRun(t, host, "admin", nil, "sudo -u agent tmux ls; sudo -u agent tmux capture-pane -p -t kb-resume; sudo cat /home/agent/kb-e2e-claude-args /var/lib/keelbox/watch/resume.json; "+
+				d, _ := sshRun(t, host, "admin", nil, "sudo -u agent tmux ls; ls -l /home/agent/.local/share/tmux/resurrect/ | tail -4; sudo -u agent tmux capture-pane -p -t kb-resume; sudo cat /home/agent/kb-e2e-claude-args /var/lib/keelbox/watch/resume.json; "+
 					"sudo journalctl -b -1 --no-pager -u keelbox-conversations.service; sudo journalctl -b --no-pager -u keelbox-watch.service -n 20")
 				t.Fatalf("the conversation in session kb-resume did not open again after systemctl reboot:\n%s", d)
 			}
 			time.Sleep(5 * time.Second)
 		}
-		must(t, host, "admin", "sudo journalctl -b -1 --no-pager -o cat -u keelbox-conversations.service", "1 conversation(s) noted")
+		must(t, host, "admin", "sudo journalctl -b -1 --no-pager -o cat -u keelbox-conversations.service", "1 conversation(s) noted", "tmux sessions saved")
 		must(t, host, "agent", "tmux kill-session -t kb-resume; sed -i '/# kb-e2e$/d' ~/.bashrc; rm -rf ~/kb-e2e-fake ~/kb-e2e-claude-args; echo cleaned", "cleaned")
-		logf(t, "PASS a reboot keelbox did not start: the conversation in tmux opened again")
+		logf(t, "PASS a reboot keelbox did not start: the conversation in tmux opened again, with a window whose program outlived SIGTERM")
 	}
 }

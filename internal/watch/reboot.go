@@ -251,13 +251,26 @@ func Restart(ctx context.Context, e *engine.Env, why string, now time.Time) erro
 	return nil
 }
 
+// ShutdownSavedPath marks that keelbox-conversations.service saved the
+// tmux sessions at this shutdown. The tmux unit's own save at its stop
+// skips then: it would run while systemd stops the panes, miss the
+// sessions already gone, and, landing in the same second, overwrite
+// resurrect's save file and delete it as a copy of itself. The unit's
+// start removes it, at every boot. Only root can write /run.
+const ShutdownSavedPath = "/run/keelbox-tmux-saved"
+
+// saved is what the shutdown save prints once resurrect's save succeeded.
+const saved = "keelbox-tmux-saved"
+
 // saveSessionsNow has tmux-resurrect save the agent's sessions now, while
-// every pane runs. The tmux unit saves again when it stops, but at a
-// shutdown systemd stops the panes' scopes alongside it, and a session
-// whose panes have gone by then is not in that save. With no server, the
-// save is skipped: resurrect would write an empty save and point its last
-// at it, so the boot would restore nothing. atShutdown runs the commands
-// without a scope, which systemd would refuse then.
+// every pane runs. With no server, the save is skipped: resurrect would
+// write an empty save and point its last at it, so the boot would restore
+// nothing.
+//
+// At shutdown the save runs through tmux run-shell, inside the agent's
+// tmux server and so in the agent's slice, since systemd refuses a new
+// scope then; the client asking for it runs without one and waits. A save
+// that succeeded leaves ShutdownSavedPath.
 func saveSessionsNow(ctx context.Context, e *engine.Env, atShutdown bool) error {
 	agent := e.AgentUser()
 	has := system.As(agent.Name, "tmux", "has-session")
@@ -265,8 +278,19 @@ func saveSessionsNow(ctx context.Context, e *engine.Env, atShutdown bool) error 
 	if _, err := bounded(ctx, e.X, has); err != nil {
 		return nil
 	}
-	save := system.As(agent.Name, agent.Home+"/.tmux/plugins/tmux-resurrect/scripts/save.sh", "quiet")
-	save.NoScope = atShutdown
-	_, err := bounded(ctx, e.X, save)
-	return err
+	script := agent.Home + "/.tmux/plugins/tmux-resurrect/scripts/save.sh"
+	if !atShutdown {
+		_, err := bounded(ctx, e.X, system.As(agent.Name, script, "quiet"))
+		return err
+	}
+	save := system.As(agent.Name, "tmux", "run-shell", "'"+script+"' quiet && echo "+saved)
+	save.NoScope = true
+	out, err := bounded(ctx, e.X, save)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(out, saved) {
+		return fmt.Errorf("tmux-resurrect's save did not finish: %s", oneLine(out))
+	}
+	return e.X.WriteFile(ShutdownSavedPath, []byte(saved+"\n"), 0o644, "root", "root")
 }

@@ -93,17 +93,19 @@ var conversationsUnit = fmt.Sprintf(`# Managed by keelbox. At every orderly shut
 [Unit]
 Description=keelbox: note the agent's conversations at shutdown
 RequiresMountsFor=%[1]s
+# A watch run still going stops first, so its save cannot land on this one.
+Before=%[6]s
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/true
+ExecStart=/bin/rm -f %[5]s
 ExecStop=-%[2]s %[3]s --local %[4]s
 TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target
-`, watch.Dir, BinaryPath, watch.NoteCommand, ConfigPath)
+`, watch.Dir, BinaryPath, watch.NoteCommand, ConfigPath, watch.ShutdownSavedPath, watch.Service)
 
 var conversationsOrder = `# Managed by keelbox. Stops each user manager after
 # ` + ConversationsUnit + `, so at shutdown it notes the agent's
