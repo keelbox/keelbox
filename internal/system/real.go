@@ -96,6 +96,13 @@ func booted() bool {
 	return err == nil && fi.IsDir()
 }
 
+// inScope says whether c runs as u in a scope in u's slice: on a machine
+// systemd runs, for an account that is not a system account (no one's
+// limits to keep), unless c asks for none.
+func inScope(c Cmd, u User, booted bool) bool {
+	return booted && u.UID >= 1000 && !c.NoScope
+}
+
 // accountArgv is the command line that runs c as u. It starts from root's
 // absolute paths only, in a scope in the account's own slice when systemd
 // runs the machine, so the account's limits cover what it starts there and
@@ -158,8 +165,7 @@ func (r *Real) Run(ctx context.Context, c Cmd) (Result, error) {
 		if err != nil {
 			return Result{ExitCode: -1}, fmt.Errorf("run as %s: %w", c.User, err)
 		}
-		// A system account is no one's limits to keep.
-		argv = accountArgv(u, c, prog, booted() && u.UID >= 1000)
+		argv = accountArgv(u, c, prog, inScope(c, u, booted()))
 		// runuser applies the account's groups (docker, for example). A
 		// new session has no controlling terminal: a program of the
 		// account's cannot open the admin's terminal through /dev/tty

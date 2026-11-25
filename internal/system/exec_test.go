@@ -219,3 +219,27 @@ func TestAccountLookPath(t *testing.T) {
 		}
 	}
 }
+
+// A command that runs while the box shuts down asks for no scope: systemd
+// refuses to start one then. Every other command of a person's account
+// runs in a scope in its slice; a system account's never does.
+func TestInScope(t *testing.T) {
+	agent, sys := User{Name: "agent", UID: 1002}, User{Name: "caddy", UID: 998}
+	shutdown := As("agent", "tmux", "list-panes")
+	shutdown.NoScope = true
+	for _, c := range []struct {
+		c      Cmd
+		u      User
+		booted bool
+		want   bool
+	}{
+		{As("agent", "tmux", "list-panes"), agent, true, true},
+		{shutdown, agent, true, false},
+		{As("agent", "tmux", "list-panes"), agent, false, false},
+		{As("caddy", "true"), sys, true, false},
+	} {
+		if got := inScope(c.c, c.u, c.booted); got != c.want {
+			t.Errorf("%s as uid %d, booted %v: scope %v", c.c, c.u.UID, c.booted, got)
+		}
+	}
+}

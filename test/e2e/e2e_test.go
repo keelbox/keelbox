@@ -388,7 +388,8 @@ exec -a claude sleep 86400
 FAKE
 chmod +x ~/kb-e2e-fake/claude && echo 'alias claude=~/kb-e2e-fake/claude # kb-e2e' >> ~/.bashrc && `+
 		`tmux new-session -d -s kb-resume -c /tmp && sleep 1 && tmux send-keys -t kb-resume 'claude --model opus' Enter && sleep 2 && cat ~/kb-e2e-claude-args`, "--model opus")
-	// tmux-resurrect saves at shutdown; nothing of keelbox's runs before it.
+	// At shutdown keelbox-conversations.service notes the pane before the
+	// agent's user manager stops, and tmux-resurrect saves the sessions.
 	return func() {
 		t.Helper()
 		deadline := time.Now().Add(5 * time.Minute)

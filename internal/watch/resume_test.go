@@ -169,6 +169,33 @@ func TestNoteAtShutdown(t *testing.T) {
 		t.Errorf("noted %+v", r)
 	}
 
+	if l := lastCall(b, "(as agent) tmux list-panes"); !l.NoScope {
+		t.Error("tmux was asked in a scope at shutdown, which systemd refuses")
+	}
+
+	// tmux cannot be asked: keelbox's own note, taken before its reboot,
+	// stays.
+	b = setup(t, "", "stopping")
+	b.Fail("(as agent) tmux list-panes")
+	writeResume(t, b, Resume{Saved: night.Add(-time.Minute), Boot: "boot-1", Panes: []ResumePane{{Pane: "main:1.1", Command: []string{"claude", "--continue"}}}})
+	if got := NoteAtShutdown(ctx, b.e, night); !strings.HasPrefix(got, "nothing noted, the last note kept: listing the tmux panes") {
+		t.Errorf("said %q", got)
+	}
+	if r, ok := readResume(t, b); !ok || len(r.Panes) != 1 {
+		t.Errorf("the note before the reboot was lost: %+v", r)
+	}
+
+	// The box goes down again before the first watch run replayed the
+	// last boot's note: no pane runs an agent CLI yet, and the note stays.
+	b = setup(t, "", "stopping")
+	b.OK("(as agent) tmux list-panes", "main:1.1\t100\t/home/agent/app\n")
+	b.OK("ps -u agent", "  100     1 -bash\n")
+	writeResume(t, b, Resume{Saved: night.Add(-10 * time.Minute), Boot: "boot-0", Panes: []ResumePane{{Pane: "main:1.1", Command: []string{"claude", "--continue"}}}})
+	NoteAtShutdown(ctx, b.e, night)
+	if r, ok := readResume(t, b); !ok || r.Boot != "boot-0" {
+		t.Errorf("an unreplayed note was dropped: %+v", r)
+	}
+
 	b = setup(t, "", "running")
 	writeResume(t, b, Resume{Saved: night.Add(-time.Hour), Boot: "boot-0"})
 	if got := NoteAtShutdown(ctx, b.e, night); !strings.Contains(got, "not shutting down (running)") {
@@ -185,6 +212,39 @@ func TestNoteAtShutdown(t *testing.T) {
 	if _, ok := readResume(t, b); ok {
 		t.Error("noted without session recovery")
 	}
+}
+
+// A soft reboot keeps the boot id and time, but the agent's tmux server
+// starts again with the panes: that is a reboot for the resume.
+func TestResumeAfterSoftReboot(t *testing.T) {
+	b := rebootBox(t, "")
+	bootIs(t, b, "boot-1")
+	if err := b.WriteFile("/proc/stat", []byte("btime "+strconv.FormatInt(night.Add(-48*time.Hour).Unix(), 10)+"\n"), 0o444, "root", "root"); err != nil {
+		t.Fatal(err)
+	}
+	writeResume(t, b, Resume{Saved: night, Boot: "boot-1", Panes: []ResumePane{{Pane: "main:1.1", Dir: "/home/agent", Command: []string{"claude", "--continue"}}}})
+	b.OK("(as agent) tmux list-panes", "main:1.1\tbash\t/home/agent\n")
+	b.OK("(as agent) tmux display-message -p #{start_time}", strconv.FormatInt(night.Add(-time.Hour).Unix(), 10)+"\n")
+	resumeConversations(context.Background(), b.e, night.Add(time.Minute))
+	if len(sent(b)) != 0 {
+		t.Fatalf("typed into a server that was there before the note: %q", sent(b))
+	}
+	b.OK("(as agent) tmux display-message -p #{start_time}", strconv.FormatInt(night.Add(time.Minute).Unix(), 10)+"\n")
+	resumeConversations(context.Background(), b.e, night.Add(2*time.Minute))
+	if got := sent(b); len(got) != 2 || got[0] != "-t main:1.1 -l -- claude --continue" {
+		t.Errorf("typed %q", got)
+	}
+}
+
+// lastCall is the last command run that starts with prefix.
+func lastCall(b *box, prefix string) system.Cmd {
+	var last system.Cmd
+	for _, c := range b.Calls {
+		if strings.HasPrefix(c.String(), prefix) {
+			last = c
+		}
+	}
+	return last
 }
 
 func writeResume(t *testing.T, b *box, r Resume) {

@@ -233,7 +233,9 @@ func AfterReboot(c *config.Config) string {
 // asked can say so first, and records why in the logbook.
 func Restart(ctx context.Context, e *engine.Env, why string, now time.Time) error {
 	if e.Cfg.TmuxRecovery() {
-		noteConversations(ctx, e, now)
+		if _, err := noteConversations(ctx, e, now, false); err != nil && e.Log != nil {
+			fmt.Fprintf(e.Log, "keelbox: noting the conversations to resume: %v\n", err)
+		}
 		agent := e.AgentUser()
 		// With no server, resurrect's save writes an empty save and points
 		// its last at it, so the boot would restore nothing.

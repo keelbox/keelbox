@@ -203,15 +203,19 @@ func resumeCommand(e *engine.Env, p agentProc) []string {
 }
 
 // conversations lists the tmux panes that run an agent CLI, each with the
-// command that resumes it.
-func conversations(ctx context.Context, e *engine.Env) []ResumePane {
+// command that resumes it. An error means tmux could not be asked, which
+// is not the same as no panes. At shutdown the command runs without a
+// scope of its own, which systemd would refuse.
+func conversations(ctx context.Context, e *engine.Env, atShutdown bool) ([]ResumePane, error) {
 	if !e.Cfg.Tmux() {
-		return nil
+		return nil, nil
 	}
 	agent := e.AgentUser()
-	out, err := bounded(ctx, e.X, system.As(agent.Name, "tmux", "list-panes", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index}\t#{pane_pid}\t#{pane_current_path}"))
+	list := system.As(agent.Name, "tmux", "list-panes", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index}\t#{pane_pid}\t#{pane_current_path}")
+	list.NoScope = atShutdown
+	out, err := bounded(ctx, e.X, list)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	procs := agentProcs(ctx, e)
 	var panes []ResumePane
@@ -235,28 +239,37 @@ func conversations(ctx context.Context, e *engine.Env) []ResumePane {
 			}
 		}
 	}
-	return panes
+	return panes, nil
 }
 
 // noteConversations writes ResumePath before a reboot, or removes an old
-// one when no pane runs an agent CLI. It returns how many it noted.
-func noteConversations(ctx context.Context, e *engine.Env, now time.Time) int {
-	panes := conversations(ctx, e)
+// one when no pane runs an agent CLI. It returns how many it noted. When
+// tmux cannot be asked, the last note stays. So does a note from an
+// earlier boot that no watch run has replayed yet, when no pane runs an
+// agent CLI now: the box went down again before the panes were resumed.
+func noteConversations(ctx context.Context, e *engine.Env, now time.Time, atShutdown bool) (int, error) {
+	panes, err := conversations(ctx, e, atShutdown)
+	if err != nil {
+		return 0, fmt.Errorf("listing the tmux panes: %s", oneLine(err.Error()))
+	}
 	if len(panes) == 0 {
+		if b, err := e.X.ReadFile(ResumePath); err == nil {
+			var r Resume
+			if json.Unmarshal(b, &r) == nil && r.Boot != "" && r.Boot != bootID(e.X) {
+				return 0, nil
+			}
+		}
 		_ = e.X.Remove(ResumePath)
-		return 0
+		return 0, nil
 	}
 	b, err := json.MarshalIndent(Resume{Saved: now, Boot: bootID(e.X), Panes: panes}, "", "  ")
 	if err == nil {
 		err = e.X.WriteFile(ResumePath, append(b, '\n'), 0o600, "root", "root")
 	}
 	if err != nil {
-		if e.Log != nil {
-			fmt.Fprintf(e.Log, "keelbox: noting the conversations to resume: %v\n", err)
-		}
-		return 0
+		return 0, err
 	}
-	return len(panes)
+	return len(panes), nil
 }
 
 // NoteAtShutdown is keelbox-conversations.service's stop. systemd stops
@@ -273,7 +286,10 @@ func NoteAtShutdown(ctx context.Context, e *engine.Env, now time.Time) string {
 	if state, _ := bounded(ctx, e.X, system.C("systemctl", "is-system-running")); state != "stopping" {
 		return "nothing noted: the box is not shutting down (" + state + ")"
 	}
-	n := noteConversations(ctx, e, now)
+	n, err := noteConversations(ctx, e, now, true)
+	if err != nil {
+		return "nothing noted, the last note kept: " + err.Error()
+	}
 	return strconv.Itoa(n) + " conversation(s) noted to open again after the boot"
 }
 
@@ -296,11 +312,19 @@ func resumeConversations(ctx context.Context, e *engine.Env, now time.Time) {
 	}
 	// The time runs from the boot, so a box that was off for days still
 	// resumes; before the reboot, and when the boot time is unknown, from
-	// the note.
+	// the note. A soft reboot (systemctl soft-reboot) keeps the boot id
+	// and time but starts the agent's tmux server again: a server started
+	// after the note has the panes back too.
 	rebooted := r.Boot == "" || r.Boot != bootID(e.X)
 	since := r.Saved
 	if boot, ok := bootTime(e.X); ok && rebooted && boot.After(since) {
 		since = boot
+	}
+	if start, ok := tmuxStarted(ctx, e); ok && start.After(r.Saved) {
+		rebooted = true
+		if start.After(since) {
+			since = start
+		}
 	}
 	if now.Sub(since) > resumeFor {
 		_ = e.X.Remove(ResumePath)
@@ -367,4 +391,17 @@ func shellLine(args []string) string {
 		q[i] = shellWord(a)
 	}
 	return strings.Join(q, " ")
+}
+
+// tmuxStarted is when the agent's tmux server started.
+func tmuxStarted(ctx context.Context, e *engine.Env) (time.Time, bool) {
+	out, err := bounded(ctx, e.X, system.As(e.AgentUser().Name, "tmux", "display-message", "-p", "#{start_time}"))
+	if err != nil {
+		return time.Time{}, false
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
+	if err != nil || n <= 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(n, 0).UTC(), true
 }

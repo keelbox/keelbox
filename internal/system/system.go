@@ -29,6 +29,10 @@ type Cmd struct {
 	// Timeout bounds the command; zero is none for root's commands and
 	// AccountTimeout for another account's.
 	Timeout time.Duration
+	// NoScope runs another account's command without a scope of its own
+	// in the account's slice. Only for a command that runs while the box
+	// shuts down: systemd starts no new units then, and refuses the scope.
+	NoScope bool
 }
 
 // String renders the command for logs and error messages.
