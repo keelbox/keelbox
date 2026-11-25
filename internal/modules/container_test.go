@@ -116,7 +116,7 @@ func TestContainerChecksOnLXD(t *testing.T) {
 		t.Fatal("apply went ahead with nesting off and no tun")
 	}
 	want := `testbox is an LXC container, and nothing has changed:
-  - nesting is off, so rootless Docker and the agents' sandboxes cannot start
+  - nesting is off (a new user namespace cannot mount /proc), so Docker and the agents' sandboxes cannot start
   - /dev/net/tun cannot be opened, so Tailscale cannot start
 Change them on the LXD host:
   lxc config set kb-lxc-1 security.nesting=true
@@ -170,7 +170,7 @@ func TestContainerChecksWithoutAGuestSocket(t *testing.T) {
 	}
 	msg := err.Error()
 	for _, w := range []string{
-		"  - nesting is off, so the agents' sandboxes cannot start\n",
+		"  - nesting is off (a new user namespace cannot mount /proc), so the agents' sandboxes cannot start\n",
 		"On Proxmox, where CTID is the container's number:\n  pct config CTID | grep -E '^(features|dev[0-9])'\n  pct set CTID --features nesting=1,keyctl=1    # keep the features listed above, comma-separated\n  pct reboot CTID\n",
 		"On LXD, or with incus for Incus:\n  lxc config set ubuntu security.nesting=true\n  lxc restart ubuntu\n",
 	} {
@@ -223,5 +223,58 @@ func TestContainerNameIsALabel(t *testing.T) {
 	s.Files["/etc/hostname"] = &system.FakeFile{Data: []byte("$(id)\n"), Mode: 0o644, Owner: "root", Group: "root"}
 	if n := containerName(context.Background(), e, ""); n != "NAME" {
 		t.Errorf("name %q", n)
+	}
+}
+
+// With Tailscale on and no guest socket, the Proxmox commands add the TUN
+// device on a free devN after reading the existing ones.
+func TestContainerTunOnProxmox(t *testing.T) {
+	s := lxcSim(t)
+	s.nestingOff = false
+	e := simEnv(t, s, testConfig(t, ""))
+	msg := CheckContainer(context.Background(), e).Error()
+	for _, w := range []string{
+		"  pct config CTID | grep -E '^(features|dev[0-9])'\n  pct set CTID --dev1 /dev/net/tun    # a devN not listed above; Proxmox 8.1 or later\n  pct reboot CTID\n",
+		"  lxc config device add ubuntu tun unix-char path=/dev/net/tun\n",
+	} {
+		if !strings.Contains(msg, w) {
+			t.Errorf("error lacks %q:\n%s", w, msg)
+		}
+	}
+	if strings.Contains(msg, "nesting") {
+		t.Errorf("nesting is on, yet named:\n%s", msg)
+	}
+}
+
+// Both sockets: doctor cannot say which tool, so it points at apply.
+func TestContainerDoctorWithBothSockets(t *testing.T) {
+	s := lxcSim(t)
+	guestDir(s, "/dev/lxd")
+	guestDir(s, "/dev/incus")
+	e := simEnv(t, s, testConfig(t, ""))
+	for _, c := range []string{"container-nesting", "container-tun"} {
+		if n := containerFindings(e)[c]; n.Level != engine.LevelFail || !strings.HasSuffix(n.Detail, "keelbox apply testbox prints the commands for the container's host") {
+			t.Errorf("%s: %+v", c, n)
+		}
+	}
+}
+
+// cloud-init's local_hostname names the container only on LXD's or Incus's
+// datasource; elsewhere it is the hostname cloud-init was given, and once
+// it is the box's it says nothing about the container.
+func TestContainerNameFromCloudInitPlatform(t *testing.T) {
+	s := newSim(t)
+	s.lxc = true
+	s.AddFile("/etc/hostname", "testbox\n", 0o644)
+	e := simEnv(t, s, testConfig(t, ""))
+	for data, want := range map[string]string{
+		`{"v1":{"local_hostname":"testbox","platform":"lxd"}}`:     "testbox",
+		`{"v1":{"local_hostname":"testbox","platform":"nocloud"}}`: "NAME",
+		`{"v1":{"local_hostname":"ct-7","platform":"nocloud"}}`:    "ct-7",
+	} {
+		s.AddFile("/run/cloud-init/instance-data.json", data, 0o644)
+		if n := containerName(context.Background(), e, ""); n != want {
+			t.Errorf("%s: name %q, want %q", data, n, want)
+		}
 	}
 }

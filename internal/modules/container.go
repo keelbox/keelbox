@@ -15,9 +15,9 @@ import (
 // 0091), but two of the container's own settings decide whether parts of
 // the box can work, and neither can be changed from inside it (ADR 0092):
 //
-//   - nesting: rootless Docker and the agent CLIs' sandboxes (bwrap) mount
-//     /proc in a new user namespace, which an LXC container without nesting
-//     refuses. LXD and Incus leave it off by default.
+//   - nesting: Docker (the system daemon and the agent's rootless one)
+//     and the agent CLIs' sandboxes (bwrap) mount /proc in a new user
+//     namespace, which an LXC container without nesting refuses. LXD and Incus leave it off by default.
 //   - /dev/net/tun: tailscaled needs the TUN device, which Proxmox does not
 //     pass to an unprivileged container by default.
 //
@@ -76,17 +76,21 @@ func lxcContainer(ctx context.Context, e *engine.Env) (lxcHost, bool) {
 
 // containerName is the container's name as LXD or Incus knows it, which
 // their commands need. keelbox renames the host to the box, so the
-// hostname is the container's name only until the first apply; cloud-init's
-// local_hostname and the guest API's meta-data keep it. When neither
-// answers and the hostname is already the box's, it is NAME.
+// hostname is the container's name only until the first apply. LXD's and
+// Incus's cloud-init datasource (platform lxd) and their guest API's
+// meta-data keep it; on another platform local_hostname is only the
+// hostname cloud-init was given, so it gets the same check as the
+// hostname. When none answers and the hostname is already the box's, it
+// is NAME.
 func containerName(ctx context.Context, e *engine.Env, sock string) string {
 	if b, err := e.X.ReadFile("/run/cloud-init/instance-data.json"); err == nil {
 		var d struct {
 			V1 struct {
 				LocalHostname string `json:"local_hostname"`
+				Platform      string `json:"platform"`
 			} `json:"v1"`
 		}
-		if json.Unmarshal(b, &d) == nil && labelName(d.V1.LocalHostname) {
+		if json.Unmarshal(b, &d) == nil && labelName(d.V1.LocalHostname) && (d.V1.Platform == "lxd" || d.V1.LocalHostname != e.Cfg.Host.Hostname) {
 			return d.V1.LocalHostname
 		}
 	}
@@ -118,7 +122,7 @@ func labelName(s string) bool {
 	return strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-") == ""
 }
 
-// nestingProbe does what rootless Docker and bwrap do first: a new user,
+// nestingProbe does what Docker and bwrap do first: a new user,
 // mount and PID namespace with /proc mounted in it. It leaves nothing
 // behind; the namespaces end with the command.
 var nestingProbe = system.Cmd{Name: "unshare", Args: []string{"--user", "--map-root-user", "--mount", "--pid", "--fork", "--mount-proc", "true"}, Timeout: 10 * time.Second}
@@ -130,13 +134,13 @@ var nestingProbe = system.Cmd{Name: "unshare", Args: []string{"--user", "--map-r
 var tunProbe = system.Cmd{Name: "sh", Args: []string{"-c", "[ -c /dev/net/tun ] && : <>/dev/net/tun"}, Timeout: 10 * time.Second}
 
 // nestingNeed is what needs nesting on this box, or "" when nothing does:
-// rootless Docker, and the agent CLIs' sandboxes.
+// Docker, system and rootless, and the agent CLIs' sandboxes.
 func nestingNeed(e *engine.Env) string {
 	switch docker, agents := e.Cfg.Docker(), len(e.Cfg.Agents) > 0; {
 	case docker && agents:
-		return "rootless Docker and the agents' sandboxes"
+		return "Docker and the agents' sandboxes"
 	case docker:
-		return "rootless Docker"
+		return "Docker"
 	case agents:
 		return "the agents' sandboxes"
 	}
@@ -148,7 +152,7 @@ func nestingNeed(e *engine.Env) string {
 func containerLimits(ctx context.Context, e *engine.Env) []ContainerLimit {
 	var out []ContainerLimit
 	if need := nestingNeed(e); need != "" && !system.Succeeds(ctx, e.X, nestingProbe) {
-		out = append(out, ContainerLimit{Check: "container-nesting", Problem: "nesting is off, so " + need + " cannot start"})
+		out = append(out, ContainerLimit{Check: "container-nesting", Problem: "nesting is off (a new user namespace cannot mount /proc), so " + need + " cannot start"})
 	}
 	if e.Cfg.Tailscale() && !system.Succeeds(ctx, e.X, tunProbe) {
 		out = append(out, ContainerLimit{Check: "container-tun", Problem: "/dev/net/tun cannot be opened, so Tailscale cannot start"})

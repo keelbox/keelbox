@@ -90,7 +90,7 @@ See [a machine already in use](machine-in-use.md) for what that accepts.
 
 ### An LXC container
 
-`acme is an LXC container, and nothing has changed`. Rootless Docker and the agents' sandboxes need nesting on, and Tailscale needs `/dev/net/tun`. Only the container's host can change either, so the message prints the commands for it. Run them there, then `keelbox apply acme`.
+`acme is an LXC container, and nothing has changed`. Docker and the agents' sandboxes need nesting on, and Tailscale needs `/dev/net/tun`. Only the container's host can change either, so the message prints the commands for it. Run them there, then `keelbox apply acme`.
 
 On LXD or Incus the commands carry the container's name, or `NAME` when keelbox cannot read it; add `--project` or a `remote:` prefix as you would for that container. `Device already exists` means a `tun` device is there but does not work: `lxc config device remove NAME tun`, then add it again.
 
@@ -105,7 +105,7 @@ pct set CTID --dev1 /dev/net/tun             # a devN not listed above
 pct reboot CTID
 ```
 
-In the web interface: Options, Features for nesting; Resources, Add, Device Passthrough for the device. `--devN` needs Proxmox 8.1 or later. On older releases, add these lines to `/etc/pve/lxc/CTID.conf`, then reboot the container:
+In the web interface: Options, Features for nesting; Resources, Add, Device Passthrough for the device, from Proxmox 8.2. `--devN` needs Proxmox 8.1 or later. On older releases, add these lines to `/etc/pve/lxc/CTID.conf`, then reboot the container:
 
 ```text
 lxc.cgroup2.devices.allow: c 10:200 rwm
