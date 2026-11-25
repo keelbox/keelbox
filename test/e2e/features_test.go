@@ -383,19 +383,24 @@ func terminfoChecks(t *testing.T, host string) {
 	t.Helper()
 	must(t, host, "agent", "stat -c '%n %a %U' /etc/terminfo/x /etc/terminfo/x/xterm-ghostty /usr/share/terminfo/x/xterm-kitty",
 		"/etc/terminfo/x 755 root", "/etc/terminfo/x/xterm-ghostty 644 root", "/usr/share/terminfo/x/xterm-kitty 644 root")
-	probe := func(term string) (string, error) {
-		return sshRun(t, host, "agent", nil, "export TERM="+term+"; tput cup 0 0 >/dev/null && script -qec 'tmux -L kb-term new-session true' /dev/null </dev/null")
+	tmux := func(term string) (string, error) {
+		return sshRun(t, host, "agent", nil, "TERM="+term+" script -qec 'tmux -L kb-term new-session true' /dev/null </dev/null")
 	}
 	ok := true
 	for _, term := range []string{"xterm-ghostty", "xterm-kitty"} {
-		if out, err := probe(term); err != nil {
+		if out, err := sshRun(t, host, "agent", nil, "TERM="+term+" tput cup 0 0"); err != nil {
 			ok = false
-			t.Errorf("TERM=%s: tmux or tput failed for the agent: %v\n%s", term, err, out)
+			t.Errorf("TERM=%s: tput failed for the agent: %v\n%s", term, err, out)
+		}
+		if out, err := tmux(term); err != nil {
+			ok = false
+			t.Errorf("TERM=%s: the agent's tmux did not start: %v\n%s", term, err, out)
 		}
 	}
-	if out, err := probe("xterm-kb-none"); err == nil {
+	// The control: the same tmux, with a TERM no entry has.
+	if out, err := tmux("xterm-kb-none"); err == nil || !strings.Contains(out, "missing or unsuitable terminal") {
 		ok = false
-		t.Errorf("a TERM with no entry worked too, so the check proves nothing:\n%s", out)
+		t.Errorf("tmux with a TERM no entry has did not fail as tmux does, so the check proves nothing: %v\n%s", err, out)
 	}
 	if !ok {
 		return

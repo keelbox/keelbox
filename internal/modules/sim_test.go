@@ -64,7 +64,9 @@ type sim struct {
 	// noGhostty is a release whose ncurses-term lacks ghostty (24.04);
 	// ncursesRev stands for the release's version of its entries, which
 	// an upgrade or an update changes. umask is root's when tic runs.
+	// noBase is a box whose ncurses-base and ncurses-term entries are gone.
 	noGhostty  bool
+	noBase     bool
 	ncursesRev string
 	umask      fs.FileMode
 	// nftLoaded is the agent table as the kernel has it: the rules file as
@@ -217,6 +219,8 @@ func (s *sim) terminfoPackaged(dir, name string) (string, bool) {
 	from := map[string]string{"xterm-256color": "ncurses-base", "kitty": "ncurses-term", "xterm-kitty": "kitty-terminfo", "xterm-ghostty": "ghostty"}[name]
 	switch {
 	case dir != "/usr/share/terminfo":
+		return "", false
+	case s.noBase && (from == "ncurses-base" || from == "ncurses-term" || name == "ghostty"):
 		return "", false
 	case name == "ghostty" && !s.noGhostty:
 		from = "ncurses-term"
@@ -416,14 +420,18 @@ func (s *sim) run(c system.Cmd) (system.Result, error) {
 			s.Files[arg(1)].Mode = fs.FileMode(m)
 		}
 		return res("")
-	case "infocmp": // infocmp -A DIR -x -1 NAME
+	case "infocmp": // infocmp -D, or infocmp -A DIR -x -1 NAME
+		if strings.Join(a, " ") == "-D" {
+			return res("/etc/terminfo\n/root/.terminfo\n/usr/share/terminfo\n")
+		}
 		if len(a) != 5 || a[0] != "-A" || a[2] != "-x" || a[3] != "-1" {
 			return failed(c)
 		}
 		dir, name := a[1], a[4]
 		if dir == TerminfoDir {
-			if !s.has(terminfoFile(name)) {
-				return failed(c)
+			f, ok := s.Files[terminfoFile(name)]
+			if !ok || !strings.Contains(string(f.Data), "|") {
+				return failed(c) // missing, or not an entry infocmp reads
 			}
 			return res("#\tReconstructed via infocmp from file: " + terminfoFile(name) + "\n" + string(s.Files[terminfoFile(name)].Data))
 		}
@@ -432,28 +440,20 @@ func (s *sim) run(c system.Cmd) (system.Result, error) {
 			return failed(c)
 		}
 		return res(name + "|" + name + ",\n" + body)
-	case "tic":
-		if strings.Join(a, " ") != "-x -o "+TerminfoDir+" -" {
+	case "tic": // an entry's source on stdin, with no use=: tic resolves nothing
+		if strings.Join(a, " ") != "-x -o "+TerminfoDir+" -" || strings.Contains(string(c.Stdin), "use=") {
 			return failed(c)
 		}
-		var names string
-		for _, l := range strings.Split(string(c.Stdin), "\n") {
-			switch t := strings.TrimSpace(l); {
-			case strings.HasPrefix(t, "use="):
-				body, ok := s.terminfoPackaged("/usr/share/terminfo", strings.TrimSuffix(strings.TrimPrefix(t, "use="), ","))
-				if !ok {
-					return failed(c)
-				}
-				name, _, _ := strings.Cut(names, "|")
-				f := terminfoFile(name)
-				if !s.has(path.Dir(f)) {
-					s.Files[path.Dir(f)] = &system.FakeFile{Dir: true, Mode: 0o777 &^ s.umask, Owner: "root", Group: "root"}
-				}
-				s.Files[f] = &system.FakeFile{Data: []byte(names + "\n" + body), Mode: 0o666 &^ s.umask, Owner: "root", Group: "root"}
-			case t != "":
-				names = t
-			}
+		names, body, _ := strings.Cut(string(c.Stdin), "\n")
+		name, _, _ := strings.Cut(names, "|")
+		if name == "" || !strings.HasSuffix(names, ",") {
+			return failed(c)
 		}
+		f := terminfoFile(name)
+		if !s.has(path.Dir(f)) {
+			s.Files[path.Dir(f)] = &system.FakeFile{Dir: true, Mode: 0o777 &^ s.umask, Owner: "root", Group: "root"}
+		}
+		s.Files[f] = &system.FakeFile{Data: []byte(names + "\n" + body), Mode: 0o666 &^ s.umask, Owner: "root", Group: "root"}
 		return res("")
 	case "tmux":
 		switch arg(0) {

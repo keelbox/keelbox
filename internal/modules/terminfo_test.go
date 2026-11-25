@@ -155,3 +155,64 @@ func TestTerminfoLeavesAnotherEntryAlone(t *testing.T) {
 		t.Errorf("the user's entry became %q", got)
 	}
 }
+
+// The user's own xterm-ghostty stays when a package installs the name
+// too: keelbox removes only a copy it compiled.
+func TestTerminfoLeavesTheUsersEntryWhenAPackageArrives(t *testing.T) {
+	s := newSim(t)
+	s.AddFile(ghosttyEntry, "xterm-ghostty|ghostty,\n\tam,\n", 0o644)
+	e := simEnv(t, s, testConfig(t, ""))
+	applyAll(t, e)
+	s.pkgs["ghostty"] = "1"
+	if d := terminfoPending(t, e); d != "" {
+		t.Errorf("plan: %q", d)
+	}
+	applyAll(t, e)
+	if got := ghosttyNames(s); got != "xterm-ghostty|ghostty," {
+		t.Errorf("the user's entry became %q", got)
+	}
+}
+
+// softFailure is the terminfo step's failure in an apply, "" if none.
+func softFailure(t *testing.T, e *engine.Env) string {
+	t.Helper()
+	res, err := engine.Apply(context.Background(), e, All())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range res.Failed {
+		if f.Step == "terminfo" {
+			return f.Detail
+		}
+	}
+	return ""
+}
+
+// A file in keelbox's place that infocmp cannot read is not keelbox's:
+// apply leaves it, says how to clear it, and the rest of the box applies.
+func TestTerminfoLeavesAnUnreadableFileAndSaysSo(t *testing.T) {
+	s := newSim(t)
+	s.AddFile(ghosttyEntry, "garbage", 0o644)
+	e := simEnv(t, s, testConfig(t, ""))
+	d := softFailure(t, e)
+	if !strings.Contains(d, "sudo rm "+ghosttyEntry) || !strings.Contains(d, "keelbox apply "+e.Cfg.Box) {
+		t.Errorf("failure: %q", d)
+	}
+	if string(s.Files[ghosttyEntry].Data) != "garbage" {
+		t.Error("the file was overwritten")
+	}
+}
+
+// With neither the base nor the fallback, apply names the packages to
+// reinstall and writes nothing.
+func TestTerminfoWithoutABaseSaysWhatToReinstall(t *testing.T) {
+	s := newSim(t)
+	s.noBase = true
+	e := simEnv(t, s, testConfig(t, ""))
+	if d := softFailure(t, e); !strings.Contains(d, "sudo apt-get install --reinstall ncurses-base ncurses-term") {
+		t.Errorf("failure: %q", d)
+	}
+	if s.has(ghosttyEntry) {
+		t.Error("an entry was written")
+	}
+}
