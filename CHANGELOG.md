@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.0](https://github.com/keelbox/keelbox/compare/v0.1.1...v0.2.0) (2026-11-25)
+
+
+### Features
+
+* **host:** terminfo for Ghostty, cmux and kitty over ssh ([#13](https://github.com/keelbox/keelbox/issues/13)) ([150c0c5](https://github.com/keelbox/keelbox/commit/150c0c5e4266c0ea81557241b8cc52589947b0d6))
+* **sessions:** click the box name to pick any session or window ([#11](https://github.com/keelbox/keelbox/issues/11)) ([34dc304](https://github.com/keelbox/keelbox/commit/34dc3048ec3f802b773eb2753e41067f130aedde))
+
+
+### Bug Fixes
+
+* check an LXC container's nesting and TUN device before apply and in doctor ([#14](https://github.com/keelbox/keelbox/issues/14)) ([0f1c7b5](https://github.com/keelbox/keelbox/commit/0f1c7b54b0a632a3c876131d2ac14aabe6f45256))
+* **cli:** stop before any change on a box that reaches the internet over IPv6 only ([#17](https://github.com/keelbox/keelbox/issues/17)) ([2bbdb10](https://github.com/keelbox/keelbox/commit/2bbdb10b3d37f1b81acab467ad3cce277749dbaa))
+* **hetzner:** say when Hetzner refuses a server and offer the ways on ([#18](https://github.com/keelbox/keelbox/issues/18)) ([3cc6846](https://github.com/keelbox/keelbox/commit/3cc684672f4e8210b59410727c2e4b06d4aa66fa))
+* **provider:** list offered host keys fingerprint first, as host_key takes them ([#16](https://github.com/keelbox/keelbox/issues/16)) ([e603fc1](https://github.com/keelbox/keelbox/commit/e603fc1341db03f523a4e46cc4af46e6d79adb21))
+
 ## [0.1.1](https://github.com/keelbox/keelbox/compare/v0.1.0...v0.1.1) (2026-11-24)
 
 
