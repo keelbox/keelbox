@@ -236,13 +236,8 @@ func Restart(ctx context.Context, e *engine.Env, why string, now time.Time) erro
 		if _, err := noteConversations(ctx, e, now, false); err != nil && e.Log != nil {
 			fmt.Fprintf(e.Log, "keelbox: noting the conversations to resume: %v\n", err)
 		}
-		agent := e.AgentUser()
-		// With no server, resurrect's save writes an empty save and points
-		// its last at it, so the boot would restore nothing.
-		if _, err := bounded(ctx, e.X, system.As(agent.Name, "tmux", "has-session")); err == nil {
-			if _, err := bounded(ctx, e.X, system.As(agent.Name, agent.Home+"/.tmux/plugins/tmux-resurrect/scripts/save.sh", "quiet")); err != nil && e.Log != nil {
-				fmt.Fprintf(e.Log, "keelbox: saving the tmux sessions before the reboot: %s\n", oneLine(err.Error()))
-			}
+		if err := saveSessionsNow(ctx, e, false); err != nil && e.Log != nil {
+			fmt.Fprintf(e.Log, "keelbox: saving the tmux sessions before the reboot: %s\n", oneLine(err.Error()))
 		}
 	}
 	if _, err := e.X.Run(ctx, system.C("systemd-run", "--quiet", "--on-active="+strconv.Itoa(int(RebootDelay.Seconds())), "--timer-property=AccuracySec=1s", "systemctl", "reboot")); err != nil {
@@ -254,4 +249,24 @@ func Restart(ctx context.Context, e *engine.Env, why string, now time.Time) erro
 		fmt.Fprintf(e.Log, "keelbox: the reboot is not in the logbook: %v\n", err)
 	}
 	return nil
+}
+
+// saveSessionsNow has tmux-resurrect save the agent's sessions now, while
+// every pane runs. The tmux unit saves again when it stops, but at a
+// shutdown systemd stops the panes' scopes alongside it, and a session
+// whose panes have gone by then is not in that save. With no server, the
+// save is skipped: resurrect would write an empty save and point its last
+// at it, so the boot would restore nothing. atShutdown runs the commands
+// without a scope, which systemd would refuse then.
+func saveSessionsNow(ctx context.Context, e *engine.Env, atShutdown bool) error {
+	agent := e.AgentUser()
+	has := system.As(agent.Name, "tmux", "has-session")
+	has.NoScope = atShutdown
+	if _, err := bounded(ctx, e.X, has); err != nil {
+		return nil
+	}
+	save := system.As(agent.Name, agent.Home+"/.tmux/plugins/tmux-resurrect/scripts/save.sh", "quiet")
+	save.NoScope = atShutdown
+	_, err := bounded(ctx, e.X, save)
+	return err
 }

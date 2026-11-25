@@ -273,7 +273,8 @@ func noteConversations(ctx context.Context, e *engine.Env, now time.Time, atShut
 }
 
 // NoteAtShutdown is keelbox-conversations.service's stop. systemd stops
-// the unit before the user managers, so the agent's tmux still runs. It
+// the unit before the user managers, so the agent's tmux still runs, with
+// every pane: it notes the conversations and saves the sessions then. It
 // notes only while the box is shutting down: a stop within a boot (an
 // apply restarting the unit, systemctl stop) leaves the last note alone,
 // so a later crash cannot resume conversations from long ago. It returns
@@ -290,7 +291,13 @@ func NoteAtShutdown(ctx context.Context, e *engine.Env, now time.Time) string {
 	if err != nil {
 		return "nothing noted, the last note kept: " + err.Error()
 	}
-	return strconv.Itoa(n) + " conversation(s) noted to open again after the boot"
+	msg := strconv.Itoa(n) + " conversation(s) noted to open again after the boot"
+	if err := saveSessionsNow(ctx, e, true); err != nil {
+		msg += "; saving the tmux sessions failed: " + oneLine(err.Error())
+	} else {
+		msg += "; tmux sessions saved"
+	}
+	return msg
 }
 
 // shells are what a restored pane runs before anything is typed into it.

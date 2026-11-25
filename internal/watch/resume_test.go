@@ -169,8 +169,10 @@ func TestNoteAtShutdown(t *testing.T) {
 		t.Errorf("noted %+v", r)
 	}
 
-	if l := lastCall(b, "(as agent) tmux list-panes"); !l.NoScope {
-		t.Error("tmux was asked in a scope at shutdown, which systemd refuses")
+	for _, c := range []string{"(as agent) tmux list-panes", "(as agent) tmux has-session", "(as agent) /home/agent/.tmux/plugins/tmux-resurrect/scripts/save.sh quiet"} {
+		if l := lastCall(b, c); l.Name == "" || !l.NoScope {
+			t.Errorf("%s: not run, or in a scope at shutdown, which systemd refuses: %+v", c, l)
+		}
 	}
 
 	// tmux cannot be asked: keelbox's own note, taken before its reboot,
