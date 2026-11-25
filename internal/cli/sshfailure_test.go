@@ -243,9 +243,9 @@ func TestSSHFailureEndsWithTheFix(t *testing.T) {
 			err: keyscan, user: "admin", cmd: "apply",
 			want: "192.0.2.10 answers on port 22 but offered no SSH host key to pin (ssh-keyscan 192.0.2.10: exit status 1). Check SSH runs there: ssh admin@192.0.2.10 true",
 		},
-		"keelbox on the box failed":   {err: exitStatus(1), user: "admin", cmd: "doctor", keeps: true},
-		"not ssh":                     {err: errors.New("no keelbox binary for arm64"), user: "admin", cmd: "plan", keeps: true},
-		"the command on the box":      {err: errors.New("ssh admin@192.0.2.10: exit status 1: cat: nothing"), user: "admin", keeps: true},
+		"keelbox on the box failed": {err: exitStatus(1), user: "admin", cmd: "doctor", keeps: true},
+		"not ssh":                   {err: errors.New("no keelbox binary for arm64"), user: "admin", cmd: "plan", keeps: true},
+		"the command on the box":    {err: errors.New("ssh admin@192.0.2.10: exit status 1: cat: nothing"), user: "admin", keeps: true},
 		"a host key nobody confirmed": {
 			err: &provider.HostKeyError{Host: "192.0.2.10", Offered: []provider.HostKey{{Type: "ssh-ed25519", Blob: "AAAAC3NzaC1lZDI1NTE5AAAAIKeelbox"}}}, user: "admin", cmd: "plan",
 			want: "192.0.2.10 is not a host keelbox has connected to, and no terminal is attached to confirm its host key. It offers " + hostKeyFP + " (ssh-ed25519). " +
