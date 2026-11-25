@@ -271,8 +271,11 @@ func TestBox(t *testing.T) {
 		allowChecks(t, host, cfg) // this machine is on the LXD bridge's private network
 	}
 
-	// 4. Reboot, then doctor and sessions again.
+	// 4. Reboot, then doctor and sessions again. The reboot is systemd's,
+	// not keelbox's: the conversation in tmux opens again all the same.
+	resumed := conversationBeforeReboot(t, host)
 	reboot(t, host)
+	resumed()
 	if out, err := kb(t, "doctor", cfg); err != nil {
 		t.Fatalf("doctor after reboot: %v\n%s", err, out)
 	}
@@ -366,4 +369,43 @@ func reboot(t *testing.T, host string) {
 		}
 	}
 	t.Fatal("box did not come back after reboot")
+}
+
+// conversationBeforeReboot starts a stand-in for Claude Code in a tmux
+// session, and returns a check that, after a reboot keelbox did not start,
+// the watch run typed the command that opens its conversation (ADR 0096).
+// The real claude is installed, so an alias in the agent's ~/.bashrc points
+// the typed command at the stand-in; the check takes it out again.
+func conversationBeforeReboot(t *testing.T, host string) func() {
+	t.Helper()
+	const fakeID = "66666666-7777-8888-9999-000000000000"
+	must(t, host, "agent", `mkdir -p ~/kb-e2e-fake && cat > ~/kb-e2e-fake/claude <<'FAKE'
+#!/bin/bash
+echo "$*" >> ~/kb-e2e-claude-args
+mkdir -p ~/.claude/sessions
+printf '{"pid":%d,"sessionId":"`+fakeID+`","status":"idle"}' $$ > ~/.claude/sessions/$$.json
+exec -a claude sleep 86400
+FAKE
+chmod +x ~/kb-e2e-fake/claude && echo 'alias claude=~/kb-e2e-fake/claude # kb-e2e' >> ~/.bashrc && `+
+		`tmux new-session -d -s kb-resume -c /tmp && sleep 1 && tmux send-keys -t kb-resume 'claude --model opus' Enter && sleep 2 && cat ~/kb-e2e-claude-args`, "--model opus")
+	// tmux-resurrect saves at shutdown; nothing of keelbox's runs before it.
+	return func() {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Minute)
+		for {
+			got, _ := sshRun(t, host, "agent", nil, "tmux has-session -t kb-resume 2>/dev/null && echo back; cat ~/kb-e2e-claude-args")
+			if strings.Contains(got, "back") && strings.Contains(got, "--resume "+fakeID) {
+				break
+			}
+			if time.Now().After(deadline) {
+				d, _ := sshRun(t, host, "admin", nil, "sudo -u agent tmux ls; sudo -u agent tmux capture-pane -p -t kb-resume; sudo cat /home/agent/kb-e2e-claude-args /var/lib/keelbox/watch/resume.json; "+
+					"sudo journalctl -b -1 --no-pager -u keelbox-conversations.service; sudo journalctl -b --no-pager -u keelbox-watch.service -n 20")
+				t.Fatalf("the conversation in session kb-resume did not open again after systemctl reboot:\n%s", d)
+			}
+			time.Sleep(5 * time.Second)
+		}
+		must(t, host, "admin", "sudo journalctl -b -1 --no-pager -o cat -u keelbox-conversations.service", "1 conversation(s) noted")
+		must(t, host, "agent", "tmux kill-session -t kb-resume; sed -i '/# kb-e2e$/d' ~/.bashrc; rm -rf ~/kb-e2e-fake ~/kb-e2e-claude-args; echo cleaned", "cleaned")
+		logf(t, "PASS a reboot keelbox did not start: the conversation in tmux opened again")
+	}
 }

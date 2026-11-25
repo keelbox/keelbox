@@ -16,19 +16,26 @@ import (
 )
 
 // Resuming the agent's conversations after a reboot
-// (docs/adr/0090-reboots-for-updates.md). Before a reboot, Restart notes
-// each tmux pane where Claude Code or Codex runs, and what to type there to
-// open the same conversation again. tmux-resurrect brings the panes back,
-// each at a shell in its directory, and the first watch runs after the
-// boot type the command into each.
+// (docs/adr/0090-reboots-for-updates.md, 0096-resume-after-any-reboot.md).
+// Before a reboot, each tmux pane where Claude Code or Codex runs is noted,
+// with what to type there to open the same conversation again: by Restart,
+// and at every orderly shutdown by keelbox-conversations.service, so a
+// reboot keelbox did not start (unattended-upgrades at a set time, sudo
+// reboot, a cloud console) is covered too. tmux-resurrect brings the panes
+// back, each at a shell in its directory, and the first watch runs after
+// the boot type the command into each.
 
 // ResumePath holds the panes to resume: root's, as the commands are typed
 // into the agent's panes from it.
 const ResumePath = Dir + "/resume.json"
 
-// resumeFor is how long after the save the watch run keeps trying: the
-// panes come back within a minute or two of the boot.
+// resumeFor is how long after the boot the watch run keeps trying: the
+// panes come back within a minute or two of it.
 const resumeFor = 20 * time.Minute
+
+// NoteCommand is keelbox-conversations.service's stop: it notes the
+// conversations when the box shuts down.
+const NoteCommand = "note-conversations"
 
 // Resume is the note Restart writes.
 type Resume struct {
@@ -232,20 +239,42 @@ func conversations(ctx context.Context, e *engine.Env) []ResumePane {
 }
 
 // noteConversations writes ResumePath before a reboot, or removes an old
-// one when no pane runs an agent CLI.
-func noteConversations(ctx context.Context, e *engine.Env, now time.Time) {
+// one when no pane runs an agent CLI. It returns how many it noted.
+func noteConversations(ctx context.Context, e *engine.Env, now time.Time) int {
 	panes := conversations(ctx, e)
 	if len(panes) == 0 {
 		_ = e.X.Remove(ResumePath)
-		return
+		return 0
 	}
 	b, err := json.MarshalIndent(Resume{Saved: now, Boot: bootID(e.X), Panes: panes}, "", "  ")
 	if err == nil {
 		err = e.X.WriteFile(ResumePath, append(b, '\n'), 0o600, "root", "root")
 	}
-	if err != nil && e.Log != nil {
-		fmt.Fprintf(e.Log, "keelbox: noting the conversations to resume: %v\n", err)
+	if err != nil {
+		if e.Log != nil {
+			fmt.Fprintf(e.Log, "keelbox: noting the conversations to resume: %v\n", err)
+		}
+		return 0
 	}
+	return len(panes)
+}
+
+// NoteAtShutdown is keelbox-conversations.service's stop. systemd stops
+// the unit before the user managers, so the agent's tmux still runs. It
+// notes only while the box is shutting down: a stop within a boot (an
+// apply restarting the unit, systemctl stop) leaves the last note alone,
+// so a later crash cannot resume conversations from long ago. It returns
+// what it did, for the journal.
+func NoteAtShutdown(ctx context.Context, e *engine.Env, now time.Time) string {
+	if !e.Cfg.TmuxRecovery() {
+		return "nothing noted: the tmux sessions are not restored (sessions.recovery is off)"
+	}
+	// is-system-running exits non-zero for every state but running.
+	if state, _ := bounded(ctx, e.X, system.C("systemctl", "is-system-running")); state != "stopping" {
+		return "nothing noted: the box is not shutting down (" + state + ")"
+	}
+	n := noteConversations(ctx, e, now)
+	return strconv.Itoa(n) + " conversation(s) noted to open again after the boot"
 }
 
 // shells are what a restored pane runs before anything is typed into it.
@@ -261,15 +290,27 @@ func resumeConversations(ctx context.Context, e *engine.Env, now time.Time) {
 		return
 	}
 	var r Resume
-	if json.Unmarshal(b, &r) != nil || now.Sub(r.Saved) > resumeFor {
+	if json.Unmarshal(b, &r) != nil {
+		_ = e.X.Remove(ResumePath)
+		return
+	}
+	// The time runs from the boot, so a box that was off for days still
+	// resumes; before the reboot, and when the boot time is unknown, from
+	// the note.
+	rebooted := r.Boot == "" || r.Boot != bootID(e.X)
+	since := r.Saved
+	if boot, ok := bootTime(e.X); ok && rebooted && boot.After(since) {
+		since = boot
+	}
+	if now.Sub(since) > resumeFor {
 		_ = e.X.Remove(ResumePath)
 		if e.Log != nil && len(r.Panes) > 0 {
 			fmt.Fprintf(e.Log, "keelbox watch-run: %d conversation(s) not resumed after the reboot: their tmux panes did not come back\n", len(r.Panes))
 		}
 		return
 	}
-	if r.Boot != "" && r.Boot == bootID(e.X) {
-		return // not rebooted yet
+	if !rebooted {
+		return
 	}
 	agent := e.AgentUser()
 	out, err := bounded(ctx, e.X, system.As(agent.Name, "tmux", "list-panes", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_current_path}"))

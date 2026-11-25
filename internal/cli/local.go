@@ -147,6 +147,8 @@ func runLocal(ctx context.Context, cmd string, cfg *config.Config, o options, st
 		return Reports(env, o, stdout, stderr)
 	case watch.Command, modules.EventsCommand:
 		return dayTwo(ctx, cmd, env, stdout, stderr)
+	case watch.NoteCommand:
+		return noteConversations(ctx, env, stdout)
 	case doctorrun.Command:
 		return doctorRun(ctx, env, modules.All(), stdout, stderr)
 	case "backup", "restore":

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/keelbox/keelbox/internal/system"
 )
 
 const sessionID = "1c478115-31e5-4bdf-969c-92af7b92c176"
@@ -118,6 +120,70 @@ func TestResumeAfterTheReboot(t *testing.T) {
 	resumeConversations(ctx, b.e, night.Add(resumeFor+time.Minute))
 	if _, ok := readResume(t, b); ok {
 		t.Error("the note outlived its time")
+	}
+}
+
+// A box that was off for days resumes too: the time runs from the boot,
+// not from the note.
+func TestResumeAfterDaysOff(t *testing.T) {
+	b := rebootBox(t, "")
+	bootIs(t, b, "boot-2")
+	writeResume(t, b, Resume{Saved: night.Add(-72 * time.Hour), Boot: "boot-1", Panes: []ResumePane{
+		{Pane: "main:1.1", Dir: "/home/agent/app", Command: []string{"claude", "--resume", sessionID}},
+	}})
+	up := night.Add(-3 * time.Minute)
+	if err := b.WriteFile("/proc/stat", []byte("cpu  1 2 3\nbtime "+strconv.FormatInt(up.Unix(), 10)+"\n"), 0o444, "root", "root"); err != nil {
+		t.Fatal(err)
+	}
+	b.OK("(as agent) tmux list-panes", "main:1.1\tbash\t/home/agent/app\n")
+	resumeConversations(context.Background(), b.e, night)
+	if got := sent(b); len(got) != 2 || got[0] != "-t main:1.1 -l -- claude --resume "+sessionID {
+		t.Errorf("typed %q", got)
+	}
+	if _, ok := readResume(t, b); ok {
+		t.Error("note kept after every pane resumed")
+	}
+}
+
+// At an orderly shutdown keelbox-conversations.service notes the
+// conversations, whoever started the reboot. A stop within a boot, and a
+// box without session recovery, note nothing and leave the last note.
+func TestNoteAtShutdown(t *testing.T) {
+	setup := func(t *testing.T, extra, state string) *box {
+		b := rebootBox(t, extra)
+		bootIs(t, b, "boot-1")
+		b.On("systemctl is-system-running", system.Result{Stdout: state + "\n", ExitCode: 1})
+		b.OK("(as agent) tmux list-panes", "main:1.1\t100\t/home/agent/app\n")
+		b.OK("ps -u agent", "  100     1 -bash\n  101   100 claude --model opus\n")
+		writeClaudeSession(t, b, 101, `{"sessionId":"`+sessionID+`"}`)
+		return b
+	}
+	ctx := context.Background()
+
+	b := setup(t, "", "stopping")
+	if got := NoteAtShutdown(ctx, b.e, night); !strings.HasPrefix(got, "1 conversation(s) noted") {
+		t.Errorf("said %q", got)
+	}
+	r, ok := readResume(t, b)
+	if !ok || len(r.Panes) != 1 || r.Boot != "boot-1" || !reflect.DeepEqual(r.Panes[0].Command, []string{"claude", "--resume", sessionID, "--model", "opus"}) {
+		t.Errorf("noted %+v", r)
+	}
+
+	b = setup(t, "", "running")
+	writeResume(t, b, Resume{Saved: night.Add(-time.Hour), Boot: "boot-0"})
+	if got := NoteAtShutdown(ctx, b.e, night); !strings.Contains(got, "not shutting down (running)") {
+		t.Errorf("said %q", got)
+	}
+	if r, _ := readResume(t, b); r.Boot != "boot-0" {
+		t.Errorf("a stop within the boot replaced the note: %+v", r)
+	}
+
+	b = setup(t, "sessions:\n  recovery: false\n", "stopping")
+	if got := NoteAtShutdown(ctx, b.e, night); !strings.Contains(got, "sessions.recovery is off") {
+		t.Errorf("said %q", got)
+	}
+	if _, ok := readResume(t, b); ok {
+		t.Error("noted without session recovery")
 	}
 }
 

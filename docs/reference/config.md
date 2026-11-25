@@ -98,7 +98,7 @@ Where the box runs and how keelbox reaches it.
 
 Idle means all of these: no one typed in a login for a few minutes and no desktop session is logged in; the agent's tmux sessions had no output and no Claude Code or Codex conversation was written for 5 minutes; no Claude Code process says it is at work; the agent uses under 10% of the CPUs; no backup runs. A connection without a terminal, such as VS Code's, also holds off the reboot. The box reboots at most once in 20 hours.
 
-After a reboot by the box or by `keelbox reboot`, each tmux pane that ran Claude Code or Codex reopens its conversation: keelbox types `claude --resume ID` or `codex resume --last`, keeping flags such as `--model`.
+After any orderly reboot, each tmux pane that ran Claude Code or Codex reopens its conversation: keelbox types `claude --resume ID` or `codex resume --last`, keeping flags such as `--model`. That holds for a reboot by the box, by `keelbox reboot`, by unattended-upgrades at a set time, by `sudo reboot` or from a cloud's console, and after the box was shut down. It needs `sessions.recovery`. A crash or a power loss gives no chance to note the conversations, and they do not reopen.
 
 ### public_ssh
 
