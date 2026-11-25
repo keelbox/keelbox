@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -233,10 +234,12 @@ func AfterReboot(c *config.Config) string {
 // asked can say so first, and records why in the logbook.
 func Restart(ctx context.Context, e *engine.Env, why string, now time.Time) error {
 	if e.Cfg.TmuxRecovery() {
-		if _, err := noteConversations(ctx, e, now, false); err != nil && e.Log != nil {
+		// With no tmux server there is nothing to note or save: the
+		// last note stays, and nothing is logged.
+		if _, err := noteConversations(ctx, e, now, false); err != nil && e.Log != nil && !strings.Contains(err.Error(), "no server running") {
 			fmt.Fprintf(e.Log, "keelbox: noting the conversations to resume: %v\n", err)
 		}
-		if err := saveSessionsNow(ctx, e, false); err != nil && e.Log != nil {
+		if err := saveSessionsNow(ctx, e, false); err != nil && !errors.Is(err, errNoServer) && e.Log != nil {
 			fmt.Fprintf(e.Log, "keelbox: saving the tmux sessions before the reboot: %s\n", oneLine(err.Error()))
 		}
 	}
@@ -250,6 +253,9 @@ func Restart(ctx context.Context, e *engine.Env, why string, now time.Time) erro
 	}
 	return nil
 }
+
+// errNoServer is a save skipped because the agent has no tmux server.
+var errNoServer = errors.New("no tmux server")
 
 // ShutdownSavedPath marks that keelbox-conversations.service saved the
 // tmux sessions at this shutdown. The tmux unit's own save at its stop
@@ -273,7 +279,7 @@ func saveSessionsNow(ctx context.Context, e *engine.Env, atShutdown bool) error 
 	has := system.As(agent.Name, "tmux", "has-session")
 	has.NoScope = atShutdown
 	if _, err := bounded(ctx, e.X, has); err != nil {
-		return nil
+		return errNoServer
 	}
 	script := agent.Home + "/.tmux/plugins/tmux-resurrect/scripts/save.sh"
 	if !atShutdown {

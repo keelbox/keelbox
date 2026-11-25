@@ -3,6 +3,7 @@ package watch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"regexp"
@@ -32,6 +33,11 @@ const ResumePath = Dir + "/resume.json"
 // resumeFor is how long after the boot the watch run keeps trying: the
 // panes come back within a minute or two of it.
 const resumeFor = 20 * time.Minute
+
+// noteKeptFor is how old a note can be and still be replayed: a box off
+// for days resumes, but a note kept while tmux stayed down is not typed
+// into panes the user brings back weeks later.
+const noteKeptFor = 14 * 24 * time.Hour
 
 // NoteCommand is keelbox-conversations.service's stop: it notes the
 // conversations when the box shuts down.
@@ -296,9 +302,12 @@ func NoteAtShutdown(ctx context.Context, e *engine.Env, now time.Time) string {
 		return "nothing noted, the last note kept: " + err.Error()
 	}
 	msg := strconv.Itoa(n) + " conversation(s) noted to open again after the boot"
-	if err := saveSessionsNow(ctx, e, true); err != nil {
+	switch err := saveSessionsNow(ctx, e, true); {
+	case errors.Is(err, errNoServer):
+		msg += "; no tmux server to save"
+	case err != nil:
 		msg += "; saving the tmux sessions failed: " + oneLine(err.Error())
-	} else {
+	default:
 		msg += "; tmux sessions saved"
 	}
 	return msg
@@ -340,7 +349,7 @@ func resumeConversations(ctx context.Context, e *engine.Env, now time.Time) {
 			since = start
 		}
 	}
-	if now.Sub(since) > resumeFor {
+	if now.Sub(since) > resumeFor || now.Sub(r.Saved) > noteKeptFor {
 		_ = e.X.Remove(ResumePath)
 		if e.Log != nil && len(r.Panes) > 0 {
 			fmt.Fprintf(e.Log, "keelbox watch-run: %d conversation(s) not resumed after the reboot: their tmux panes did not come back\n", len(r.Panes))

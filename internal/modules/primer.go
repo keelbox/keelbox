@@ -188,8 +188,8 @@ Run heavy jobs a few at a time.
 {{- end}}
 {{- if .Tmux}}
 - Sessions: tmux. Attach with ` + "`tmux new -A -s main`" + `.{{if .Recovery}} Sessions are saved every
-  15 minutes and restored after a reboot (tmux-resurrect + continuum), and
-  Claude Code and Codex reopen their conversations.{{end}}
+  15 minutes and restored after a reboot (tmux-resurrect + continuum). After an orderly
+  reboot, Claude Code and Codex reopen their conversations.{{end}}
 {{- end}}
 {{- if .Backup}}
 - Backups: the box backs up your home (or the paths the admin chose) with

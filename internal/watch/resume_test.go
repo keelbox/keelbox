@@ -143,6 +143,25 @@ func TestResumeAfterDaysOff(t *testing.T) {
 	if _, ok := readResume(t, b); ok {
 		t.Error("note kept after every pane resumed")
 	}
+
+	// A note older than noteKeptFor, kept while tmux stayed down, is
+	// dropped, not typed into panes brought back weeks later.
+	b = rebootBox(t, "")
+	bootIs(t, b, "boot-2")
+	writeResume(t, b, Resume{Saved: night.Add(-15 * 24 * time.Hour), Boot: "boot-1", Panes: []ResumePane{
+		{Pane: "main:1.1", Dir: "/home/agent/app", Command: []string{"claude", "--resume", sessionID}},
+	}})
+	if err := b.WriteFile("/proc/stat", []byte("cpu  1 2 3\nbtime "+strconv.FormatInt(up.Unix(), 10)+"\n"), 0o444, "root", "root"); err != nil {
+		t.Fatal(err)
+	}
+	b.OK("(as agent) tmux list-panes", "main:1.1\tbash\t/home/agent/app\n")
+	resumeConversations(context.Background(), b.e, night)
+	if got := sent(b); len(got) != 0 {
+		t.Errorf("a note from two weeks ago was typed: %q", got)
+	}
+	if _, ok := readResume(t, b); ok {
+		t.Error("a note from two weeks ago was kept")
+	}
 }
 
 // At an orderly shutdown keelbox-conversations.service notes the
@@ -180,6 +199,13 @@ func TestNoteAtShutdown(t *testing.T) {
 	// unit's own save at its stop is skipped.
 	if _, err := b.e.X.ReadFile(ShutdownSavedPath); err != nil {
 		t.Errorf("the save at shutdown is not marked: %v", err)
+	}
+
+	// No tmux server: nothing to save, and the journal says so.
+	b = setup(t, "", "stopping")
+	b.Fail("(as agent) tmux has-session")
+	if got := NoteAtShutdown(ctx, b.e, night); !strings.HasSuffix(got, "; no tmux server to save") {
+		t.Errorf("said %q", got)
 	}
 
 	// A save that did not finish leaves no mark: the tmux unit saves as
