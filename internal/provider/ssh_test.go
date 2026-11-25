@@ -329,3 +329,30 @@ func TestSCPDestBracketsIPv6(t *testing.T) {
 		}
 	}
 }
+
+// upload hands scp the bracketed IPv6 target and the port, as recorded by
+// a fake scp on PATH.
+func TestUploadToAnIPv6Host(t *testing.T) {
+	dir := t.TempDir()
+	argv := filepath.Join(dir, "argv")
+	scp := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argv + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "scp"), []byte(scp), 0o755); err != nil { //nolint:gosec // G306: an executable
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	s := &SSH{Host: "2001:db8::7", Port: 2222, User: "admin", KnownHosts: filepath.Join(dir, "kh")}
+	if err := s.upload(context.Background(), filepath.Join(dir, "scp"), "/var/lib/keelbox/stage/keelbox"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(argv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if last := args[len(args)-1]; last != "admin@[2001:db8::7]:/var/lib/keelbox/stage/keelbox" {
+		t.Errorf("scp target %q", last)
+	}
+	if !strings.Contains(string(data), "-P\n2222\n") {
+		t.Errorf("scp port missing: %q", data)
+	}
+}
