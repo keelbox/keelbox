@@ -10,6 +10,7 @@ import (
 
 	"github.com/keelbox/keelbox/internal/config"
 	"github.com/keelbox/keelbox/internal/prompt"
+	"github.com/keelbox/keelbox/internal/provider"
 	"github.com/keelbox/keelbox/internal/provider/hetzner"
 	"github.com/keelbox/keelbox/internal/ui"
 )
@@ -36,12 +37,38 @@ type cloudRefusal struct {
 	otherLocations, otherSizes []string
 	// locations are every location where some size can be ordered now;
 	// sizesAt lists the sizes at one, with the one to offer first (size,
-	// or the nearest to it); priceAt is size's price at one, "" where it is
-	// not sold. They are up's questions after a refusal, nil where the
-	// cloud lists none.
+	// or the nearest to it). They are up's questions after a refusal, nil
+	// where the cloud lists none.
 	locations []string
 	sizesAt   func(location string) (choices []prompt.Choice, def int)
-	priceAt   func(location string) string
+	// price is a size's price at a location, "" where it is not sold or
+	// the cloud lists no prices: the alternatives say what each costs.
+	price func(size, location string) string
+}
+
+// priceAt is the price of the size asked for at location.
+func (r *cloudRefusal) priceAt(location string) string { return r.price(r.size, location) }
+
+// priced lists names, each with its price where price gives one.
+func priced(names []string, price func(name string) string) string {
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = n
+		if p := price(n); p != "" {
+			out[i] += " at " + p
+		}
+	}
+	return strings.Join(out, ", ")
+}
+
+// pricedLocations and pricedSizes are the other locations and sizes, each
+// with what the box would cost there.
+func (r *cloudRefusal) pricedLocations() string {
+	return priced(r.otherLocations, func(l string) string { return r.price(r.size, l) })
+}
+
+func (r *cloudRefusal) pricedSizes() string {
+	return priced(r.otherSizes, func(s string) string { return r.price(s, r.location) })
 }
 
 func (r *cloudRefusal) Error() string { return r.err.Error() }
@@ -58,6 +85,14 @@ func hetznerRefusal(err error) error {
 	r := &cloudRefusal{err: err, location: re.Location, size: re.ServerType, quota: re.Quota(),
 		locationKey: "target.hetzner.location", sizeKey: "target.hetzner.server_type",
 		otherLocations: re.OtherLocations, otherSizes: re.OtherTypes}
+	r.price = func(size, location string) string {
+		for _, o := range hetzner.Offers(types, location) {
+			if o.Type.Name == size {
+				return fmt.Sprintf("EUR %.2f/month", o.Monthly)
+			}
+		}
+		return ""
+	}
 	if re.Action != "create" || len(types) == 0 {
 		return r
 	}
@@ -74,14 +109,6 @@ func hetznerRefusal(err error) error {
 			choices = append(choices, prompt.Choice{Key: o.Type.Name, Label: o.Type.Name, Detail: o.Describe()})
 		}
 		return choices, def
-	}
-	r.priceAt = func(location string) string {
-		for _, o := range hetzner.Offers(types, location) {
-			if o.Type.Name == re.ServerType {
-				return fmt.Sprintf("EUR %.2f/month", o.Monthly)
-			}
-		}
-		return ""
 	}
 	return r
 }
@@ -104,17 +131,24 @@ var exampleLocation = map[string]string{
 }
 
 // moveCommands are the commands that move box to each other cloud
-// without a terminal.
+// without a terminal. None has --yes: each stops at the go-ahead, which
+// prints what the box costs there and the command with --yes.
 func moveCommands(box, provider, extra string) string {
 	var cmds []string
 	for _, e := range otherClouds(provider) {
-		c := "keelbox up " + box + " --provider " + e.via
-		if l := exampleLocation[e.via]; l != "" {
-			c += " --location " + l
-		}
-		cmds = append(cmds, c+" --yes"+extra)
+		cmds = append(cmds, otherCloudCommand(box, e.via)+extra)
 	}
 	return orList(cmds)
+}
+
+// otherCloudCommand is keelbox up for box on the cloud via, as it runs
+// without a terminal up to the go-ahead.
+func otherCloudCommand(box, via string) string {
+	c := "keelbox up " + box + " --provider " + via
+	if l := exampleLocation[via]; l != "" {
+		c += " --location " + l
+	}
+	return c
 }
 
 // configFix is the end of a refusal for a command that reads the box's
@@ -129,11 +163,11 @@ func (r *cloudRefusal) configFix(path, retry, also string) string {
 	}
 	var known, keys []string
 	if len(r.otherLocations) > 0 {
-		known = append(known, fmt.Sprintf("Other locations for %s now: %s.", r.size, strings.Join(r.otherLocations, ", ")))
+		known = append(known, fmt.Sprintf("Other locations for %s now: %s.", r.size, r.pricedLocations()))
 		keys = append(keys, r.locationKey+": "+r.otherLocations[0])
 	}
 	if len(r.otherSizes) > 0 {
-		known = append(known, fmt.Sprintf("Other sizes in %s now: %s.", r.location, strings.Join(r.otherSizes, ", ")))
+		known = append(known, fmt.Sprintf("Other sizes in %s now: %s.", r.location, r.pricedSizes()))
 		keys = append(keys, r.sizeKey+": "+r.otherSizes[0])
 	}
 	if len(keys) == 0 {
@@ -145,7 +179,9 @@ func (r *cloudRefusal) configFix(path, retry, also string) string {
 
 // upFix is the end of a refusal when keelbox up created the box's config
 // and has no terminal to ask on: a command for each way on, each as it
-// runs. extra is added to each, as up was given it.
+// runs. extra is added to each, as up was given it. Another location or
+// size is created without another go-ahead, so each says its price;
+// another cloud stops at the go-ahead.
 func (r *cloudRefusal) upFix(box, provider, extra string) string {
 	up := "keelbox up " + box
 	move := "another cloud, with your other answers kept: " + moveCommands(box, provider, extra)
@@ -154,10 +190,10 @@ func (r *cloudRefusal) upFix(box, provider, extra string) string {
 	}
 	var ways []string
 	if len(r.otherLocations) > 0 {
-		ways = append(ways, fmt.Sprintf("another location (%s): %s --location %s%s", strings.Join(r.otherLocations, ", "), up, r.otherLocations[0], extra))
+		ways = append(ways, fmt.Sprintf("another location (%s): %s --location %s%s", r.pricedLocations(), up, r.otherLocations[0], extra))
 	}
 	if len(r.otherSizes) > 0 {
-		ways = append(ways, fmt.Sprintf("another size (%s): %s --size %s%s", strings.Join(r.otherSizes, ", "), up, r.otherSizes[0], extra))
+		ways = append(ways, fmt.Sprintf("another size in %s (%s): %s --size %s%s", r.location, r.pricedSizes(), up, r.otherSizes[0], extra))
 	}
 	ways = append(ways, move)
 	return "Try " + strings.Join(ways, "; ") + "; or the same again later: " + up + extra
@@ -169,6 +205,31 @@ func (r *cloudRefusal) upFix(box, provider, extra string) string {
 func notCreated(cfg *config.Config) bool {
 	st, ok := loadUpState(cfg)
 	return ok && isCloud(st.Via) && isCloud(cfg.Target.Provider) && st.Stage == stageConfigured && !st.Applying && st.Address == ""
+}
+
+// markOrdering marks a cloud box keelbox up configured, and has created
+// no server for yet, as having its server ordered (on) or as not (off):
+// keelbox create does, for a box up configured. It reports whether the
+// box is such a box.
+func markOrdering(cfg *config.Config, on bool) bool {
+	st, ok := loadUpState(cfg)
+	if !ok || !isCloud(st.Via) || st.Stage != stageConfigured || st.Address != "" {
+		return false
+	}
+	if st.Applying != on {
+		st.Applying = on
+		_ = saveUpState(cfg.Box, st)
+	}
+	return true
+}
+
+// forgetAnswers drops the answers up kept for a box that now has a
+// server: they were for creating it elsewhere.
+func forgetAnswers(cfg *config.Config) {
+	if st, ok := loadUpState(cfg); ok && st.Answers != nil {
+		st.Answers = nil
+		_ = saveUpState(cfg.Box, st)
+	}
 }
 
 // cloudAnswers are the answers that hold for one cloud only: they are not
@@ -202,7 +263,8 @@ func (w *wizard) keptAnswers() map[string]string {
 // placeAgain takes --location and --size for a Hetzner box whose server is
 // not created yet: they change where it is created. Elsewhere they change
 // nothing, and ignoredFlags says so. --provider naming the box's own cloud
-// changes nothing either, and is taken without a word.
+// changes nothing either, and is taken without a word. Each is checked
+// against Hetzner's lists before the config changes.
 func (w *wizard) placeAgain(ctx context.Context, cfg *config.Config) error {
 	if w.o.set["provider"] && w.o.provider == cfg.Target.Provider {
 		delete(w.o.set, "provider")
@@ -210,12 +272,13 @@ func (w *wizard) placeAgain(ctx context.Context, cfg *config.Config) error {
 	if cfg.Target.Provider != config.ProviderHetzner || !w.o.set["location"] && !w.o.set["size"] {
 		return nil
 	}
-	path := boxConfigPath(cfg.Box)
+	box, path := cfg.Box, boxConfigPath(cfg.Box)
+	cl, err := hetznerClient(ctx, cfg, w.o, w.p, w.out)
+	if err != nil {
+		return err
+	}
+	loc := cfg.Target.Hetzner.Location
 	if w.o.set["location"] {
-		cl, err := hetznerClient(ctx, cfg, w.o, w.p, w.out)
-		if err != nil {
-			return err
-		}
 		locs, err := cl.Locations(ctx)
 		if err != nil {
 			return err
@@ -226,8 +289,38 @@ func (w *wizard) placeAgain(ctx context.Context, cfg *config.Config) error {
 		}
 		if !contains(names, w.o.location) {
 			return fmt.Errorf("--location %q is not a Hetzner location; use one of: %s, for example: keelbox up %s --location %s",
-				w.o.location, strings.Join(names, ", "), cfg.Box, firstNonEmpty(append(names, "fsn1")...))
+				w.o.location, strings.Join(names, ", "), box, firstNonEmpty(append(names, "fsn1")...))
 		}
+		loc = w.o.location
+	}
+	if w.o.set["size"] {
+		types, err := cl.ServerTypes(ctx)
+		if err != nil {
+			return err
+		}
+		if _, ok := hetzner.TypeNamed(types, w.o.size); !ok {
+			var names []string
+			for _, o := range hetzner.Offers(types, loc) {
+				names = append(names, o.Type.Name)
+			}
+			if len(names) == 0 {
+				return fmt.Errorf("--size %q is not a Hetzner server type, and none can be ordered in %s now; try another location: keelbox up %s --location LOCATION", w.o.size, loc, box)
+			}
+			return fmt.Errorf("--size %q is not a Hetzner server type; use one that can be ordered in %s now: %s, for example: keelbox up %s --size %s",
+				w.o.size, loc, strings.Join(names, ", "), box, names[0])
+		}
+	}
+	var keys []string
+	for _, f := range []struct{ flag, key, value string }{
+		{"location", "target.hetzner.location", w.o.location},
+		{"size", "target.hetzner.server_type", w.o.size},
+	} {
+		if w.o.set[f.flag] {
+			keys = append(keys, f.key+": "+f.value)
+		}
+	}
+	if err := w.noServerYet(ctx, cfg, w.upCommand(nil), "set "+strings.Join(keys, " and ")+" in "+tildePath(path)+", then: keelbox up "+box); err != nil {
+		return err
 	}
 	for _, f := range []struct{ flag, key, value string }{
 		{"location", "target.hetzner.location", w.o.location},
@@ -237,11 +330,40 @@ func (w *wizard) placeAgain(ctx context.Context, cfg *config.Config) error {
 			continue
 		}
 		if err := w.setPlace(cfg, path, f.key, f.value); err != nil {
-			return fmt.Errorf("--%s %q: %v; set %s in %s yourself, then: keelbox up %s", f.flag, f.value, err, f.key, tildePath(path), cfg.Box)
+			return fmt.Errorf("--%s %q: %v; set %s in %s yourself, then: keelbox up %s", f.flag, f.value, err, f.key, tildePath(path), box)
 		}
 		delete(w.o.set, f.flag) // taken: not one of the flags that change nothing
 	}
 	return nil
+}
+
+// noServerYet checks, before up moves a box to another cloud or changes
+// where its server is created, that the cloud has no server keelbox
+// created for it. Up's progress says it has none, but a create run by
+// hand, or one stopped part-way, may have made one: moving the box would
+// leave it billed and unmanaged. Should there be one, up records it, so
+// that keelbox up carries on with it there. again is the command that
+// runs up again as asked, elsewhere what to run after deleting the server
+// to go ahead anyway.
+func (w *wizard) noServerYet(ctx context.Context, cfg *config.Config, again, elsewhere string) error {
+	box, at := cfg.Box, cfg.Target.Provider
+	cl, err := openCloud(ctx, cfg, w.o, noPrompt(), io.Discard)
+	if err == nil {
+		var srv *cloudServer
+		srv, err = cl.find(ctx)
+		switch {
+		case err == nil:
+			if st, ok := loadUpState(cfg); ok {
+				st.Address, st.Bootstrap, st.Stage, st.Applying, st.Answers = srv.ip, bootstrapUser(st.Via), stageServer, true, nil
+				_ = saveUpState(box, st)
+			}
+			return fmt.Errorf("%s has a server on %s after all, %s, which keelbox created; a box has one server, so nothing changed. Set it up there: keelbox up %s. "+
+				"Or delete it first: keelbox destroy %s, then %s", box, at, srv.about, box, box, elsewhere)
+		case provider.NoServer(err):
+			return nil
+		}
+	}
+	return fmt.Errorf("nothing changed: keelbox could not check %s for a server of %s (%v). Once it can: %s", at, box, err, again)
 }
 
 // setPlace sets one key of where the box's server is created, and says so.
@@ -404,7 +526,12 @@ func (w *wizard) moveCloud(ctx context.Context, name string, cfg *config.Config)
 	}
 	w.useDraft(d) // the command line's flags win
 	to := w.o.provider
-	w.moving, w.next = cfg.Target.Provider, "keelbox up "+name+" --provider "+to
+	// What carries the move on is this command with the flags it was
+	// given; the kept answers come from the box's progress again.
+	w.moving, w.next = cfg.Target.Provider, w.upCommand(nil)
+	if err := w.noServerYet(ctx, cfg, w.next, "keelbox forget "+name+", then: "+w.next); err != nil {
+		return 2, err
+	}
 	w.logf("moving %s from %s to %s; nothing was created on %s", name, cfg.Target.Provider, to, cfg.Target.Provider)
 	next, nst, proceed, err := w.configure(ctx, name)
 	if err != nil || !proceed {
@@ -430,9 +557,10 @@ func (w *wizard) moveCloud(ctx context.Context, name string, cfg *config.Config)
 }
 
 // moveNext is msg, an error during a move, ending with the command that
-// carries the move on, unless it names one already.
+// carries the move on, unless it names one already: every example up
+// prints during a move is the move's own command (wizard.example).
 func (w *wizard) moveNext(msg string) string {
-	if strings.Contains(msg, w.next) {
+	if strings.Contains(msg, "keelbox up "+w.box+" --provider "+w.o.provider) {
 		return msg
 	}
 	return msg + ". Then move it: " + w.next
@@ -460,6 +588,10 @@ func (w *wizard) carryOn(ctx context.Context, cfg *config.Config, st upState) (i
 			delete(w.drafted, k)
 		}
 	}
+	// --yes was the go-ahead for the cloud refused: another cloud has
+	// another price, and up asks again.
+	_ = fs.Set("yes", "false")
+	delete(w.o.set, "yes")
 	w.o.provider = mv.via
 	w.o.set["provider"] = true
 	return w.moveCloud(ctx, cfg.Box, cfg)

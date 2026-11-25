@@ -41,8 +41,8 @@ The resize menu lists the types of the server's architecture that its location c
 
 | Message | What to do |
 |---|---|
-| `server type ... cannot be ordered in ...` at create | Set `target.hetzner.location` to a location the message lists, or choose another `server_type`. |
-| `server type ... cannot be ordered in ... now; the snapshot is kept` at resume | Run `keelbox resume acme` later, or set another `server_type` first. |
+| `Hetzner refused to create acme's server, ...` or `Hetzner lists server type ... as not orderable in ... now` at create | On a terminal, `keelbox up` asks for another location, size or cloud. Otherwise run one of the commands the message ends with. After `keelbox create`, set `target.hetzner.location` or `server_type` to one the message lists, then run `keelbox create acme` again. |
+| `Hetzner refused to create acme's server again from its snapshot, ...` at resume | The box stays parked. Set `target.hetzner.location` or `server_type` to one the message lists, then run `keelbox resume acme`, or run it later. |
 | `a firewall named keelbox-acme exists ... without keelbox's labels` | Rename or delete that firewall in the Hetzner Console. |
 
 ## AWS (Lightsail)

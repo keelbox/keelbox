@@ -92,6 +92,7 @@ var notRefusals = map[string]bool{
 	"token_readonly":   true,
 	"uniqueness_error": true, "not_found": true, "locked": true, "protected": true, "conflict": true,
 	"resource_in_use": true, "server_not_stopped": true, "rate_limit_exceeded": true,
+	"unsupported_error": true, "invalid_server_type": true,
 }
 
 // refusal reports whether err is Hetzner declining an order for a reason of
@@ -143,10 +144,10 @@ func TypeNamed(types []ServerType, name string) (ServerType, bool) {
 }
 
 // NearestOffers orders offers by how near each is to the type like: of
-// its architecture with at least its cores and memory, cheapest first;
-// then the rest of its architecture; then the other architecture. Each
-// group keeps the offers' own order. like's zero value keeps them as they
-// are.
+// its architecture with at least its cores and memory, in the offers' own
+// order (cheapest first); then the rest of its architecture, the largest
+// first; then the other architecture, in the offers' order. like's zero
+// value keeps them as they are.
 func NearestOffers(offers []Offer, like ServerType) []Offer {
 	if like.Name == "" {
 		return offers
@@ -161,7 +162,16 @@ func NearestOffers(offers []Offer, like ServerType) []Offer {
 		return 1
 	}
 	out := append([]Offer(nil), offers...)
-	sort.SliceStable(out, func(i, j int) bool { return rank(out[i]) < rank(out[j]) })
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if ra, rb := rank(a), rank(b); ra != rb || ra != 1 {
+			return ra < rb
+		}
+		if a.Type.Memory != b.Type.Memory {
+			return a.Type.Memory > b.Type.Memory
+		}
+		return a.Type.Cores > b.Type.Cores
+	})
 	return out
 }
 

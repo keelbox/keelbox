@@ -32,7 +32,7 @@ func (w *wizard) askDigitalOcean(ctx context.Context, a *answers) error {
 	s := &a.starter
 	s.Provider, s.Image = config.ProviderDigitalOcean, config.DefaultDigitalOceanImage
 	w.step("DigitalOcean sign-in")
-	again := "keelbox up " + s.Box
+	again := w.rerun(s.Box)
 	if !doInstalled() {
 		// Only the user can install it: up stops here, before any change.
 		return &needsYouError{digitalocean.ErrNoCLI.Error() + ". Then: " + again}
@@ -107,7 +107,7 @@ func (w *wizard) askDORegion(a *answers, regions []digitalocean.Region) error {
 	// doctl has no region of its own to default to, and the region decides
 	// where the user's work lives: without a terminal it must be named.
 	if !w.p.Interactive() {
-		return w.needFlag("the DigitalOcean region", "--location", "keelbox up "+s.Box+" --provider digitalocean --location fra1 --yes")
+		return w.needFlag("the DigitalOcean region", "--location", w.example("keelbox up "+s.Box+" --provider digitalocean --location fra1 --yes", map[string]string{"location": "fra1"}))
 	}
 	var choices []prompt.Choice
 	for _, r := range regions {

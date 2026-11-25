@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/keelbox/keelbox/internal/config"
+	"github.com/keelbox/keelbox/internal/provider"
 	"github.com/keelbox/keelbox/internal/provider/hetzner/hetznertest"
 )
 
@@ -89,6 +91,98 @@ func TestCreateRefusedLeavesAFirewallItDidNotMake(t *testing.T) {
 		if strings.Contains(c, "/firewalls/7") && !strings.HasPrefix(c, "GET ") {
 			t.Errorf("sent %s", c)
 		}
+	}
+}
+
+// The firewall this create made stays when it cannot be shown to be
+// unused, and the message says why.
+func TestCreateRefusedKeepsItsFirewallWhenUnsure(t *testing.T) {
+	const tail = "), free of charge; should acme move to another cloud, delete it in the Hetzner Console (Firewalls); your SSH key stays in the project for the next try"
+	for _, c := range []struct {
+		name, why string
+		onRefuse  func(a *hetznertest.API)
+	}{
+		{"attached", "something is attached to it", func(a *hetznertest.API) {
+			a.Firewalls[0]["applied_to"] = []any{map[string]any{"type": "server", "server": map[string]any{"id": 99}}}
+		}},
+		{"lookup fails", "looking it up again failed: ", func(a *hetznertest.API) { a.Fail = map[string]bool{"list_firewalls": true} }},
+		{"delete fails", "deleting it failed: ", func(a *hetznertest.API) { a.Fail = map[string]bool{"delete_firewall": true} }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cl, a := fake(t)
+			a.Keys = []hetznertest.Key{{ID: 7, Name: "laptop"}}
+			a.Refuse = map[string]hetznertest.Error{"create_server": refusals[0]}
+			a.OnCall = func(call string) {
+				if call == "POST /servers" {
+					c.onRefuse(a)
+				}
+			}
+			_, err := Create(context.Background(), cl, boxConfig(t, "ubuntu-26.04"), testHostKey, t.Logf)
+			var re *RefusedError
+			if !errors.As(err, &re) {
+				t.Fatalf("not a refusal: %v", err)
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, "No server was created. The firewall keelbox-acme stays ("+c.why) || !strings.HasSuffix(msg, tail) {
+				t.Errorf("got %s", msg)
+			}
+			if len(a.Firewalls) != 1 {
+				t.Errorf("firewall deleted: %v", a.Firewalls)
+			}
+		})
+	}
+}
+
+// Failures before the order say no server was ordered: where the box is
+// created may still change.
+func TestCreateFailuresBeforeTheOrder(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		set  func(cfg *config.Config, a *hetznertest.API)
+	}{
+		{"no such type", func(cfg *config.Config, a *hetznertest.API) { cfg.Target.Hetzner.ServerType = "cpx222" }},
+		{"no SSH key", func(cfg *config.Config, a *hetznertest.API) { a.Keys = nil }},
+		{"firewall", func(cfg *config.Config, a *hetznertest.API) { a.Fail = map[string]bool{"list_firewalls": true} }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cl, a := fake(t)
+			a.Keys = []hetznertest.Key{{ID: 7, Name: "laptop"}}
+			cfg := boxConfig(t, "ubuntu-26.04")
+			c.set(cfg, a)
+			_, err := Create(context.Background(), cl, cfg, testHostKey, t.Logf)
+			if !provider.NotOrdered(err) {
+				t.Errorf("not marked as not ordered: %v", err)
+			}
+			if len(a.Created) != 0 {
+				t.Errorf("ordered: %v", a.Created)
+			}
+		})
+	}
+	// An order Hetzner answered with an error is not certain to have
+	// created nothing.
+	cl, a := fake(t)
+	a.Keys = []hetznertest.Key{{ID: 7, Name: "laptop"}}
+	a.Fail = map[string]bool{"create_server": true}
+	if _, err := Create(context.Background(), cl, boxConfig(t, "ubuntu-26.04"), testHostKey, t.Logf); err == nil || provider.NotOrdered(err) {
+		t.Errorf("got %v", err)
+	}
+}
+
+// After the types at least as large as the one asked for come the smaller
+// ones, the largest first, then the other architecture.
+func TestNearestOffersOrder(t *testing.T) {
+	ty := func(name, arch string, cores int, mem float64) Offer {
+		return Offer{Type: ServerType{Name: name, Architecture: arch, Cores: cores, Memory: mem}}
+	}
+	offers := []Offer{
+		ty("tiny", "x86", 1, 1), ty("arm", "arm", 2, 4), ty("small", "x86", 2, 2), ty("same", "x86", 2, 4), ty("big", "x86", 4, 8), ty("mid", "x86", 1, 2),
+	}
+	var got []string
+	for _, o := range NearestOffers(offers, ServerType{Name: "cx23", Architecture: "x86", Cores: 2, Memory: 4}) {
+		got = append(got, o.Type.Name)
+	}
+	if strings.Join(got, ",") != "same,big,small,mid,tiny,arm" {
+		t.Errorf("got %v", got)
 	}
 }
 

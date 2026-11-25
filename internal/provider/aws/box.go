@@ -381,7 +381,7 @@ func Find(ctx context.Context, cl *Client, box string) (*Instance, error) {
 		return nil, err
 	}
 	if in == nil {
-		return nil, fmt.Errorf("no Lightsail instance named %s in %s; %s", box, cl.Region, provider.NoServerFix(box))
+		return nil, &provider.NoServerError{Msg: fmt.Sprintf("no Lightsail instance named %s in %s; %s", box, cl.Region, provider.NoServerFix(box))}
 	}
 	if !in.Managed(box) {
 		return nil, fmt.Errorf("the Lightsail instance %s in %s was not created by keelbox (missing the %s tags); not touching it. Use another box name, or manage it as an existing server: keelbox up %s --provider ssh --host ITS-IP",

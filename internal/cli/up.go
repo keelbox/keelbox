@@ -43,6 +43,15 @@ type upHooks struct {
 	// onRefused takes a cloud's refusal to create the server; up says
 	// what it means and how to go on.
 	onRefused func(r *cloudRefusal)
+	// onNotOrdered is told that the create failed before the cloud was
+	// asked for a server, or was refused: nothing was created.
+	onNotOrdered func()
+}
+
+func (h *upHooks) notOrdered() {
+	if h != nil && h.onNotOrdered != nil {
+		h.onNotOrdered()
+	}
 }
 
 // refused hands r to up, and reports whether up takes it.
@@ -222,6 +231,26 @@ func (w *wizard) step(name string) {
 // needFlag explains an answer up could not ask for.
 func (w *wizard) needFlag(what, flag, example string) error {
 	return fmt.Errorf("%s: no terminal to ask on; pass %s, for example: %s", what, flag, example)
+}
+
+// rerun is the command that runs up for box again once the user has done
+// what an error asks: during a move to another cloud, the move with the
+// flags it was given.
+func (w *wizard) rerun(box string) string {
+	if w.next != "" {
+		return w.next
+	}
+	return "keelbox up " + box
+}
+
+// example is plain, an example command a missing answer prints, or during
+// a move the move with change added to its flags: plain alone would not
+// move the box.
+func (w *wizard) example(plain string, change map[string]string) string {
+	if w.moving == "" {
+		return plain
+	}
+	return w.upCommand(change)
 }
 
 // hostKeyPlaceholder stands for a fingerprint in an example command: the
@@ -995,7 +1024,7 @@ func (w *wizard) askHetzner(ctx context.Context, a *answers) error {
 		case err == nil:
 			token, a.tokenStored = t, true
 		case !w.p.Interactive():
-			return w.needFlag("no Hetzner API token is stored", "--token-file with a mode 600 file holding one", "keelbox up "+s.Box+" --provider hetzner --token-file ~/hetzner.token --yes")
+			return w.needFlag("no Hetzner API token is stored", "--token-file with a mode 600 file holding one", w.example("keelbox up "+s.Box+" --provider hetzner --token-file ~/hetzner.token --yes", map[string]string{"token-file": "~/hetzner.token"})) //nolint:gosec // G101: a path in an example, no credential
 		default:
 			t, _, err := askHetznerToken(ctx, w.p, w.out, store, "hetzner")
 			if err != nil {
@@ -1741,7 +1770,13 @@ func (w *wizard) confirmPlan(a *answers) (bool, error) {
 		return true, nil
 	}
 	if !w.p.Interactive() {
-		return false, w.needFlag("confirmation", "--yes", "keelbox up "+s.Box+" --provider "+a.via+" --yes")
+		// This command with the flags it was given, and --yes: what a
+		// draft does not keep must be given again.
+		example := "keelbox up " + s.Box + " --provider " + a.via + " --yes"
+		if w.box == s.Box {
+			example = w.upCommand(map[string]string{"provider": a.via, "yes": "true"})
+		}
+		return false, w.needFlag("confirmation", "--yes", example)
 	}
 	return w.p.Confirm(question, true)
 }
@@ -2112,6 +2147,10 @@ func (w *wizard) firstApply(ctx context.Context, cfg *config.Config, st *upState
 			_ = saveUpState(box, *st)
 		},
 		onRefused: func(r *cloudRefusal) { w.refused = r },
+		onNotOrdered: func() {
+			st.Applying = false
+			_ = saveUpState(box, *st)
+		},
 	}
 	if isCloud(st.Via) {
 		if st.Stage == stageConfigured {

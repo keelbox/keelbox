@@ -507,8 +507,18 @@ func cloudCreate(ctx context.Context, cl cloud, cfg *config.Config, o options, l
 		fail(stderr, err)
 		return 1
 	}
+	// A box keelbox up configured, created here instead: from the order
+	// on, it is no longer one whose cloud may change (notCreated).
+	ordering := o.hooks == nil && boxRef(cfg, o.configFile) == cfg.Box && markOrdering(cfg, true)
 	srv, err := cl.create(ctx, provider.HostKeyPair{Private: priv, Public: pub}, logf)
 	var refused *cloudRefusal
+	if errors.As(err, &refused) || provider.NotOrdered(err) {
+		// Certain that nothing was created: where it is may still change.
+		if ordering {
+			markOrdering(cfg, false)
+		}
+		o.hooks.notOrdered()
+	}
 	if errors.As(err, &refused) {
 		if !o.hooks.refused(refused) {
 			fail(stderr, fmt.Errorf("%w. %s", err, createRefusedFix(cfg, o, refused)))
@@ -524,6 +534,9 @@ func cloudCreate(ctx context.Context, cl cloud, cfg *config.Config, o options, l
 	}
 	// The box has a server again.
 	forgetDestroyedMark(cfg.Box)
+	if ordering {
+		forgetAnswers(cfg)
+	}
 	ip := addr{srv.ip, cfg.Target.SSH.Port}
 	o.hooks.server(ip.host)
 	o.publicIP = srv.ip
@@ -594,7 +607,7 @@ func createRefusedFix(cfg *config.Config, o options, r *cloudRefusal) string {
 	if path == "" {
 		path = boxConfigPath(cfg.Box)
 	}
-	return r.configFix(path, "keelbox create "+ref, fmt.Sprintf("A box on another cloud: keelbox up %s-2 --provider %s", cfg.Box, otherClouds(cfg.Target.Provider)[0].via))
+	return r.configFix(path, "keelbox create "+ref, "A box on another cloud: "+otherCloudCommand(cfg.Box+"-2", otherClouds(cfg.Target.Provider)[0].via))
 }
 
 // createdNote is the line that ends a create, with what its time covers:

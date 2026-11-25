@@ -45,9 +45,13 @@ type API struct {
 	// Created are the bodies of the POST /servers calls, in order.
 	Created []map[string]any
 	// Fail makes a call answer a server error: shutdown, poweron,
-	// change_type, create_image, delete_server, delete_image or
-	// create_server.
+	// change_type, create_image, delete_server, delete_image,
+	// create_server, list_firewalls or delete_firewall.
 	Fail map[string]bool
+	// OnCall, when set, sees each request as "METHOD /path" before the
+	// fake answers it, and may change the fake's fields (it runs with the
+	// fake locked).
+	OnCall func(call string)
 	// Refuse makes create_server or change_type answer with an error of
 	// Hetzner's own, as it does when it will not take an order: by the
 	// call's name, or "create_server fsn1" for one location only.
@@ -263,6 +267,9 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.Requests = append(a.Requests, r.Method+" "+r.URL.RequestURI())
+	if a.OnCall != nil {
+		a.OnCall(r.Method + " " + r.URL.Path)
+	}
 	fail := func(status int, code, msg string) {
 		w.WriteHeader(status)
 		_, _ = fmt.Fprintf(w, `{"error":{"code":%q,"message":%q}}`, code, msg) //nolint:gosec // G705: a test server writing JSON
@@ -499,6 +506,9 @@ func (a *API) project(w http.ResponseWriter, r *http.Request, body map[string]an
 		a.Images = append(a.Images[:i], a.Images[i+1:]...)
 		w.WriteHeader(204)
 	case p == "/firewalls" && r.Method == "GET":
+		if broken("list_firewalls") {
+			return true
+		}
 		out := []map[string]any{}
 		for _, f := range a.Firewalls {
 			if (q.Get("name") == "" || f["name"] == q.Get("name")) && selected(q.Get("label_selector"), f) {
@@ -517,6 +527,7 @@ func (a *API) project(w http.ResponseWriter, r *http.Request, body map[string]an
 	case strings.HasPrefix(p, "/firewalls/") && r.Method == "DELETE":
 		i, f := find(a.Firewalls, strings.TrimPrefix(p, "/firewalls/"))
 		switch {
+		case broken("delete_firewall"):
 		case f == nil:
 			fail(404, "not_found", "firewall not found")
 		case len(applied(f)) > 0:

@@ -40,9 +40,13 @@ func Create(ctx context.Context, cl *Client, c *config.Config, hk HostKey, logf 
 	} else if s != nil {
 		return nil, fmt.Errorf("a server named %s already exists (id %d); converge it: keelbox apply %s, or delete it first: keelbox destroy %s", c.Box, s.ID, c.Box, c.Box)
 	}
+	// Until CreateServer, no server is ordered: each failure says so, and
+	// where the box is created may still change.
+	notOrdered := func(err error) error { return &provider.NotOrderedError{Err: err} }
+	notOrderedf := func(format string, a ...any) error { return notOrdered(fmt.Errorf(format, a...)) }
 	types, err := cl.ServerTypes(ctx)
 	if err != nil {
-		return nil, err
+		return nil, notOrdered(err)
 	}
 	var st *ServerType
 	for i := range types {
@@ -51,39 +55,39 @@ func Create(ctx context.Context, cl *Client, c *config.Config, hk HostKey, logf 
 		}
 	}
 	if st == nil {
-		return nil, fmt.Errorf("target.hetzner.server_type %q does not exist; set one keelbox up lists with prices, for example server_type: cx23", h.ServerType)
+		return nil, notOrderedf("target.hetzner.server_type %q does not exist; set one keelbox up lists with prices, for example server_type: cx23", h.ServerType)
 	}
 	if !st.AvailableIn(h.Location) {
 		return nil, (&RefusedError{Action: "create", Box: c.Box, Location: h.Location, ServerType: h.ServerType, Types: types, Left: "Nothing was created"}).alternatives(nil)
 	}
 	img, err := cl.SystemImage(ctx, h.Image, archFor(*st))
 	if err != nil {
-		return nil, err
+		return nil, notOrdered(err)
 	}
 	if img == nil {
-		return nil, fmt.Errorf("target.hetzner.image %q is not available for %s servers; set image: ubuntu-24.04 or ubuntu-26.04", h.Image, archFor(*st))
+		return nil, notOrderedf("target.hetzner.image %q is not available for %s servers; set image: ubuntu-24.04 or ubuntu-26.04", h.Image, archFor(*st))
 	}
 	keyIDs, err := sshKeyIDs(ctx, cl, c)
 	if err != nil {
-		return nil, err
+		return nil, notOrdered(err)
 	}
 	if len(keyIDs) == 0 {
-		return nil, fmt.Errorf("target.hetzner.ssh_keys: name at least one project SSH key, for the first connection as root; keelbox up %s uploads yours and sets it", c.Box)
+		return nil, notOrderedf("target.hetzner.ssh_keys: name at least one project SSH key, for the first connection as root; keelbox up %s uploads yours and sets it", c.Box)
 	}
 	userData, err := provider.UserData(c.Box, c.Host.Hostname, hk)
 	if err != nil {
-		return nil, err
+		return nil, notOrdered(err)
 	}
 	// The firewall exists before the server, so the server never boots
 	// without it. A new one admits SSH; apply closes it once the tailnet
 	// is proven.
 	had, err := FindFirewall(ctx, cl, c.Box)
 	if err != nil {
-		return nil, fmt.Errorf("cloud firewall: %w", err)
+		return nil, notOrderedf("cloud firewall: %w", err)
 	}
 	fw, changes, err := EnsureFirewall(ctx, cl, c, 0, nil)
 	if err != nil {
-		return nil, fmt.Errorf("cloud firewall: %w", err)
+		return nil, notOrderedf("cloud firewall: %w", err)
 	}
 	for _, ch := range changes {
 		logf("%s", ch)
@@ -121,15 +125,19 @@ func Create(ctx context.Context, cl *Client, c *config.Config, hk HostKey, logf 
 // left, as a sentence.
 func removeUnusedFirewall(ctx context.Context, cl *Client, box string, made bool, logf func(string, ...any)) string {
 	const key = "; your SSH key stays in the project for the next try"
+	name := FirewallName(box)
 	stays := func(why string) string {
 		return fmt.Sprintf("No server was created. The firewall %s stays (%s), free of charge; should %s move to another cloud, delete it in the Hetzner Console (Firewalls)%s",
-			FirewallName(box), why, box, key)
+			name, why, box, key)
 	}
 	if !made {
 		return stays("it was there before this create")
 	}
 	ctx = context.WithoutCancel(ctx)
 	f, err := FindFirewall(ctx, cl, box)
+	if f != nil {
+		name = f.Name
+	}
 	switch {
 	case err != nil:
 		return stays("looking it up again failed: " + err.Error())
@@ -154,7 +162,7 @@ func Find(ctx context.Context, cl *Client, box string) (*Server, error) {
 		return nil, err
 	}
 	if s == nil {
-		return nil, fmt.Errorf("no server named %s in the Hetzner project; %s", box, provider.NoServerFix(box))
+		return nil, &provider.NoServerError{Msg: fmt.Sprintf("no server named %s in the Hetzner project; %s", box, provider.NoServerFix(box))}
 	}
 	if s.Labels[LabelManaged] != "true" || s.Labels[LabelBox] != box {
 		return nil, fmt.Errorf("server %s (id %d) was not created by keelbox (missing %s labels); not touching it. Use another box name, or manage it as an existing server: keelbox up %s --provider ssh --host ITS-IP", box, s.ID, LabelManaged, box)

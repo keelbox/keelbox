@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -44,6 +45,33 @@ func Managed(labels map[string]string, box string) bool {
 // from this computer.
 func NoServerFix(box string) string {
 	return "create it: keelbox up " + box + ", or remove the box from keelbox: keelbox forget " + box
+}
+
+// NoServerError is a provider's find answering that the cloud has no
+// server of the box's name.
+type NoServerError struct{ Msg string }
+
+func (e *NoServerError) Error() string { return e.Msg }
+
+// NoServer reports whether err says the cloud has no server of the box's
+// name, as opposed to one keelbox did not create or a failed lookup.
+func NoServer(err error) bool {
+	var e *NoServerError
+	return errors.As(err, &e)
+}
+
+// NotOrderedError is a create that failed before it asked the cloud for a
+// server: nothing was created for the box, and where it is created may
+// still change.
+type NotOrderedError struct{ Err error }
+
+func (e *NotOrderedError) Error() string { return e.Err.Error() }
+func (e *NotOrderedError) Unwrap() error { return e.Err }
+
+// NotOrdered reports whether err is such a failure.
+func NotOrdered(err error) bool {
+	var e *NotOrderedError
+	return errors.As(err, &e)
 }
 
 // ParkedLabels are the labels for a box's parked snapshot: the box's own

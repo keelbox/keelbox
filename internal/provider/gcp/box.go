@@ -459,7 +459,7 @@ func Find(ctx context.Context, cl *Client, box string) (*Instance, error) {
 	if cl.Project != "" {
 		in = "the Google Cloud project " + cl.Project
 	}
-	return nil, fmt.Errorf("no VM named %s in %s; %s", box, in, provider.NoServerFix(box))
+	return nil, &provider.NoServerError{Msg: fmt.Sprintf("no VM named %s in %s; %s", box, in, provider.NoServerFix(box))}
 }
 
 // Destroy deletes a keelbox-managed VM with its disk, then the box's
