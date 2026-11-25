@@ -30,6 +30,7 @@ var internalCommands = map[string]bool{
 	modules.EventsCommand: true,
 	doctorrun.Command:     true,
 	watch.BootCommand:     true,
+	watch.NoteCommand:     true,
 	installs.Command:      true,
 }
 
@@ -147,6 +148,14 @@ func doctorRun(ctx context.Context, e *engine.Env, mods []engine.Module, stdout,
 		fmt.Fprintf(stderr, "keelbox %s: %v\n", doctorrun.Command, err)
 		return 1
 	}
+	return 0
+}
+
+// noteConversations is keelbox-conversations.service's stop (ADR 0096). It
+// takes no lock: at shutdown a watch run may hold the day-two lock, and a
+// skipped note would lose the conversations. It writes only the note.
+func noteConversations(ctx context.Context, e *engine.Env, stdout io.Writer) int {
+	fmt.Fprintf(stdout, "keelbox %s: %s\n", watch.NoteCommand, watch.NoteAtShutdown(ctx, e, time.Now().UTC()))
 	return 0
 }
 

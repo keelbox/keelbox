@@ -16,7 +16,8 @@ import (
 // Watch installs keelbox's day-two units (ADR 0030): the watch run, every
 // two minutes, the events service, which reads the agent's events file
 // as the agent whenever it changes (ADR 0032), and the boot marker that
-// tells a power loss or crash from a reboot (ADR 0040). None changes the
+// tells a power loss or crash from a reboot (ADR 0040), and the unit that
+// notes the agent's conversations at shutdown (ADR 0096). None changes the
 // box's configuration.
 type Watch struct{}
 
@@ -74,6 +75,45 @@ TimeoutSec=30
 WantedBy=multi-user.target
 `, watch.PowerDir, BinaryPath, HasCommand, watch.BootCommand, watch.CleanMarker)
 
+// The conversations unit (ADR 0096). It does nothing at start; its stop,
+// at every orderly shutdown or reboot, notes the tmux panes where Claude
+// Code or Codex runs, so the first watch runs after the boot open their
+// conversations again. The drop-in orders every user manager before it, so
+// systemd stops it, and the note is taken, while the agent's tmux server
+// still runs. A keelbox too old to know the command fails the stop, which
+// is ignored.
+const (
+	ConversationsUnit = "keelbox-conversations.service"
+	conversationsDrop = "user@.service.d/50-keelbox-conversations.conf"
+)
+
+var conversationsUnit = fmt.Sprintf(`# Managed by keelbox. At every orderly shutdown or reboot, notes the tmux
+# panes where Claude Code or Codex runs, so the next boot opens their
+# conversations again.
+[Unit]
+Description=keelbox: note the agent's conversations at shutdown
+RequiresMountsFor=%[1]s
+# A watch run still going stops first, so its save cannot land on this one.
+Before=%[6]s
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/rm -f %[5]s
+ExecStop=-%[2]s %[3]s --local %[4]s
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+`, watch.Dir, BinaryPath, watch.NoteCommand, ConfigPath, watch.ShutdownSavedPath, watch.Service)
+
+var conversationsOrder = `# Managed by keelbox. Stops each user manager after
+# ` + ConversationsUnit + `, so at shutdown it notes the agent's
+# conversations while their tmux server still runs.
+[Unit]
+Before=` + ConversationsUnit + `
+`
+
 func (Watch) Steps(e *engine.Env) []engine.Step {
 	agent := e.AgentUser()
 	steps := []engine.Step{
@@ -81,6 +121,9 @@ func (Watch) Steps(e *engine.Env) []engine.Step {
 		engine.DirStep("power-dir", watch.PowerDir, 0o755, "root", "root"),
 		unitFileStep("boot-unit-file", watch.BootUnit, bootUnit, false),
 		engine.ServiceStep("boot-unit", watch.BootUnit),
+		unitFileStep("conversations-order", conversationsDrop, conversationsOrder, false),
+		unitFileStep("conversations-unit-file", ConversationsUnit, conversationsUnit, false),
+		engine.ServiceStep("conversations-unit", ConversationsUnit),
 		engine.DirStep("events-dir", events.Dir, 0o700, "root", "root"),
 		engine.DirStep("events-queue-dir", events.QueueDir, 0o700, "root", "root"),
 		engine.DirStep("reports-dir", reports.Dir, 0o700, "root", "root"),
@@ -95,7 +138,7 @@ func (Watch) Steps(e *engine.Env) []engine.Step {
 func (Watch) Verify(ctx context.Context, e *engine.Env) []engine.Finding {
 	const mod = "watch"
 	var out []engine.Finding
-	for _, u := range [][2]string{{"timer", watch.Timer}, {"events-path", eventsPath}, {"boot-marker", watch.BootUnit}} {
+	for _, u := range [][2]string{{"timer", watch.Timer}, {"events-path", eventsPath}, {"boot-marker", watch.BootUnit}, {"conversations", ConversationsUnit}} {
 		if system.Succeeds(ctx, e.X, system.C("systemctl", "is-active", "--quiet", u[1])) {
 			out = append(out, ok(mod, u[0], u[1]+" active"))
 		} else {

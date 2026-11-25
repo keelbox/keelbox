@@ -263,8 +263,11 @@ func tmuxUnit(home string, recovery bool) string {
 		// Save only while a server runs: a save without one would replace
 		// the last save with an empty one, and the restore would bring
 		// back nothing. The watchdog restarts this unit after the server
-		// is gone (docs/adr/0039-session-watchdog.md).
-		stop = "ExecStop=-/bin/sh -c 'tmux has-session 2>/dev/null || exit 0; exec " + home + "/.tmux/plugins/tmux-resurrect/scripts/save.sh'\n"
+		// is gone (docs/adr/0039-session-watchdog.md). At a shutdown
+		// where keelbox-conversations.service has saved while every pane
+		// ran, this save is skipped: it would miss panes systemd has
+		// stopped, and could replace that save (docs/adr/0096).
+		stop = "ExecStop=-/bin/sh -c '[ -e " + watch.ShutdownSavedPath + " ] && exit 0; tmux has-session 2>/dev/null || exit 0; exec " + home + "/.tmux/plugins/tmux-resurrect/scripts/save.sh'\n"
 	}
 	return fmt.Sprintf(`# Managed by keelbox. Starts the tmux server at boot (user lingering is on)
 # so tmux-continuum restores the last saved sessions.

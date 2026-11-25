@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -233,14 +234,13 @@ func AfterReboot(c *config.Config) string {
 // asked can say so first, and records why in the logbook.
 func Restart(ctx context.Context, e *engine.Env, why string, now time.Time) error {
 	if e.Cfg.TmuxRecovery() {
-		noteConversations(ctx, e, now)
-		agent := e.AgentUser()
-		// With no server, resurrect's save writes an empty save and points
-		// its last at it, so the boot would restore nothing.
-		if _, err := bounded(ctx, e.X, system.As(agent.Name, "tmux", "has-session")); err == nil {
-			if _, err := bounded(ctx, e.X, system.As(agent.Name, agent.Home+"/.tmux/plugins/tmux-resurrect/scripts/save.sh", "quiet")); err != nil && e.Log != nil {
-				fmt.Fprintf(e.Log, "keelbox: saving the tmux sessions before the reboot: %s\n", oneLine(err.Error()))
-			}
+		// With no tmux server there is nothing to note or save: the
+		// last note stays, and nothing is logged.
+		if _, err := noteConversations(ctx, e, now, false); err != nil && e.Log != nil && !strings.Contains(err.Error(), "no server running") {
+			fmt.Fprintf(e.Log, "keelbox: noting the conversations to resume: %v\n", err)
+		}
+		if err := saveSessionsNow(ctx, e, false); err != nil && !errors.Is(err, errNoServer) && e.Log != nil {
+			fmt.Fprintf(e.Log, "keelbox: saving the tmux sessions before the reboot: %s\n", oneLine(err.Error()))
 		}
 	}
 	if _, err := e.X.Run(ctx, system.C("systemd-run", "--quiet", "--on-active="+strconv.Itoa(int(RebootDelay.Seconds())), "--timer-property=AccuracySec=1s", "systemctl", "reboot")); err != nil {
@@ -252,4 +252,46 @@ func Restart(ctx context.Context, e *engine.Env, why string, now time.Time) erro
 		fmt.Fprintf(e.Log, "keelbox: the reboot is not in the logbook: %v\n", err)
 	}
 	return nil
+}
+
+// errNoServer is a save skipped because the agent has no tmux server.
+var errNoServer = errors.New("no tmux server")
+
+// ShutdownSavedPath marks that keelbox-conversations.service saved the
+// tmux sessions at this shutdown. The tmux unit's own save at its stop
+// skips then: it would run while systemd stops the panes, miss the
+// sessions already gone, and, landing in the same second, overwrite
+// resurrect's save file and delete it as a copy of itself. The unit's
+// start removes it, at every boot. Only root can write /run.
+const ShutdownSavedPath = "/run/keelbox-tmux-saved"
+
+// saveSessionsNow has tmux-resurrect save the agent's sessions now, while
+// every pane runs. With no server, the save is skipped: resurrect would
+// write an empty save and point its last at it, so the boot would restore
+// nothing.
+//
+// At shutdown the save runs through tmux run-shell, inside the agent's
+// tmux server and so in the agent's slice, since systemd refuses a new
+// scope then; the client asking for it runs without one and waits. A save
+// that succeeded leaves ShutdownSavedPath.
+func saveSessionsNow(ctx context.Context, e *engine.Env, atShutdown bool) error {
+	agent := e.AgentUser()
+	has := system.As(agent.Name, "tmux", "has-session")
+	has.NoScope = atShutdown
+	if _, err := bounded(ctx, e.X, has); err != nil {
+		return errNoServer
+	}
+	script := agent.Home + "/.tmux/plugins/tmux-resurrect/scripts/save.sh"
+	if !atShutdown {
+		_, err := bounded(ctx, e.X, system.As(agent.Name, script, "quiet"))
+		return err
+	}
+	// run-shell without -b waits and exits with the command's status
+	// (tmux 3.4 and later); on 3.4 it prints nothing of its output.
+	save := system.As(agent.Name, "tmux", "run-shell", "'"+script+"' quiet")
+	save.NoScope = true
+	if _, err := bounded(ctx, e.X, save); err != nil {
+		return err
+	}
+	return e.X.WriteFile(ShutdownSavedPath, []byte("saved\n"), 0o644, "root", "root")
 }

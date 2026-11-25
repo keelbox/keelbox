@@ -86,3 +86,35 @@ func TestBootMarkerUnit(t *testing.T) {
 		t.Errorf("%s: %+v", watch.PowerDir, f)
 	}
 }
+
+// The conversations unit's stop notes the agent's conversations at every
+// orderly shutdown, and every user manager stops after it (ADR 0096).
+func TestConversationsUnit(t *testing.T) {
+	s := newSim(t)
+	e := simEnv(t, s, testConfig(t, ""))
+	if _, err := engine.Apply(context.Background(), e, All()); err != nil {
+		t.Fatal(err)
+	}
+	if !s.units[ConversationsUnit] {
+		t.Errorf("%s not enabled and started", ConversationsUnit)
+	}
+	unit := s.content(unitDir + ConversationsUnit)
+	for _, want := range []string{
+		"Type=oneshot\nRemainAfterExit=yes",
+		"ExecStart=/bin/rm -f /run/keelbox-tmux-saved\n",
+		"Before=keelbox-watch.service\n",
+		"ExecStop=-/usr/local/bin/keelbox note-conversations --local /etc/keelbox/keelbox.yaml\n",
+		"RequiresMountsFor=/var/lib/keelbox/watch",
+		"WantedBy=multi-user.target",
+	} {
+		if !strings.Contains(unit, want) {
+			t.Errorf("conversations unit lacks %q:\n%s", want, unit)
+		}
+	}
+	if strings.Contains(unit, "DefaultDependencies=no") {
+		t.Error("the conversations unit must keep the default dependencies")
+	}
+	if got := s.content(unitDir + "user@.service.d/50-keelbox-conversations.conf"); !strings.Contains(got, "[Unit]\nBefore="+ConversationsUnit+"\n") {
+		t.Errorf("user managers not ordered before the unit:\n%s", got)
+	}
+}

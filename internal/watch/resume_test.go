@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/keelbox/keelbox/internal/system"
 )
 
 const sessionID = "1c478115-31e5-4bdf-969c-92af7b92c176"
@@ -119,6 +121,176 @@ func TestResumeAfterTheReboot(t *testing.T) {
 	if _, ok := readResume(t, b); ok {
 		t.Error("the note outlived its time")
 	}
+}
+
+// A box that was off for days resumes too: the time runs from the boot,
+// not from the note.
+func TestResumeAfterDaysOff(t *testing.T) {
+	b := rebootBox(t, "")
+	bootIs(t, b, "boot-2")
+	writeResume(t, b, Resume{Saved: night.Add(-72 * time.Hour), Boot: "boot-1", Panes: []ResumePane{
+		{Pane: "main:1.1", Dir: "/home/agent/app", Command: []string{"claude", "--resume", sessionID}},
+	}})
+	up := night.Add(-3 * time.Minute)
+	if err := b.WriteFile("/proc/stat", []byte("cpu  1 2 3\nbtime "+strconv.FormatInt(up.Unix(), 10)+"\n"), 0o444, "root", "root"); err != nil {
+		t.Fatal(err)
+	}
+	b.OK("(as agent) tmux list-panes", "main:1.1\tbash\t/home/agent/app\n")
+	resumeConversations(context.Background(), b.e, night)
+	if got := sent(b); len(got) != 2 || got[0] != "-t main:1.1 -l -- claude --resume "+sessionID {
+		t.Errorf("typed %q", got)
+	}
+	if _, ok := readResume(t, b); ok {
+		t.Error("note kept after every pane resumed")
+	}
+
+	// A note older than noteKeptFor, kept while tmux stayed down, is
+	// dropped, not typed into panes brought back weeks later.
+	b = rebootBox(t, "")
+	bootIs(t, b, "boot-2")
+	writeResume(t, b, Resume{Saved: night.Add(-15 * 24 * time.Hour), Boot: "boot-1", Panes: []ResumePane{
+		{Pane: "main:1.1", Dir: "/home/agent/app", Command: []string{"claude", "--resume", sessionID}},
+	}})
+	if err := b.WriteFile("/proc/stat", []byte("cpu  1 2 3\nbtime "+strconv.FormatInt(up.Unix(), 10)+"\n"), 0o444, "root", "root"); err != nil {
+		t.Fatal(err)
+	}
+	b.OK("(as agent) tmux list-panes", "main:1.1\tbash\t/home/agent/app\n")
+	resumeConversations(context.Background(), b.e, night)
+	if got := sent(b); len(got) != 0 {
+		t.Errorf("a note from two weeks ago was typed: %q", got)
+	}
+	if _, ok := readResume(t, b); ok {
+		t.Error("a note from two weeks ago was kept")
+	}
+}
+
+// At an orderly shutdown keelbox-conversations.service notes the
+// conversations, whoever started the reboot. A stop within a boot, and a
+// box without session recovery, note nothing and leave the last note.
+func TestNoteAtShutdown(t *testing.T) {
+	setup := func(t *testing.T, extra, state string) *box {
+		b := rebootBox(t, extra)
+		bootIs(t, b, "boot-1")
+		b.On("systemctl is-system-running", system.Result{Stdout: state + "\n", ExitCode: 1})
+		b.OK("(as agent) tmux list-panes", "main:1.1\t100\t/home/agent/app\n")
+		b.OK("ps -u agent", "  100     1 -bash\n  101   100 claude --model opus\n")
+		writeClaudeSession(t, b, 101, `{"sessionId":"`+sessionID+`"}`)
+		b.OK("(as agent) tmux has-session", "")
+		b.OK("(as agent) tmux run-shell", "")
+		return b
+	}
+	ctx := context.Background()
+
+	b := setup(t, "", "stopping")
+	if got := NoteAtShutdown(ctx, b.e, night); !strings.HasPrefix(got, "1 conversation(s) noted") {
+		t.Errorf("said %q", got)
+	}
+	r, ok := readResume(t, b)
+	if !ok || len(r.Panes) != 1 || r.Boot != "boot-1" || !reflect.DeepEqual(r.Panes[0].Command, []string{"claude", "--resume", sessionID, "--model", "opus"}) {
+		t.Errorf("noted %+v", r)
+	}
+
+	for _, c := range []string{"(as agent) tmux list-panes", "(as agent) tmux has-session", "(as agent) tmux run-shell '/home/agent/.tmux/plugins/tmux-resurrect/scripts/save.sh' quiet"} {
+		if l := lastCall(b, c); l.Name == "" || !l.NoScope {
+			t.Errorf("%s: not run, or in a scope at shutdown, which systemd refuses: %+v", c, l)
+		}
+	}
+	// The save ran inside the tmux server, and is marked so the tmux
+	// unit's own save at its stop is skipped.
+	if _, err := b.e.X.ReadFile(ShutdownSavedPath); err != nil {
+		t.Errorf("the save at shutdown is not marked: %v", err)
+	}
+
+	// No tmux server: nothing to save, and the journal says so.
+	b = setup(t, "", "stopping")
+	b.Fail("(as agent) tmux has-session")
+	if got := NoteAtShutdown(ctx, b.e, night); !strings.HasSuffix(got, "; no tmux server to save") {
+		t.Errorf("said %q", got)
+	}
+
+	// A save that did not finish leaves no mark: the tmux unit saves as
+	// before.
+	b = setup(t, "", "stopping")
+	b.On("(as agent) tmux run-shell", system.Result{Stdout: "'save.sh quiet' returned 1\n", ExitCode: 1})
+	if got := NoteAtShutdown(ctx, b.e, night); !strings.Contains(got, "saving the tmux sessions failed") {
+		t.Errorf("said %q", got)
+	}
+	if _, err := b.e.X.ReadFile(ShutdownSavedPath); err == nil {
+		t.Error("a failed save was marked")
+	}
+
+	// tmux cannot be asked: keelbox's own note, taken before its reboot,
+	// stays.
+	b = setup(t, "", "stopping")
+	b.Fail("(as agent) tmux list-panes")
+	writeResume(t, b, Resume{Saved: night.Add(-time.Minute), Boot: "boot-1", Panes: []ResumePane{{Pane: "main:1.1", Command: []string{"claude", "--continue"}}}})
+	if got := NoteAtShutdown(ctx, b.e, night); !strings.HasPrefix(got, "nothing noted, the last note kept: listing the tmux panes") {
+		t.Errorf("said %q", got)
+	}
+	if r, ok := readResume(t, b); !ok || len(r.Panes) != 1 {
+		t.Errorf("the note before the reboot was lost: %+v", r)
+	}
+
+	// The box goes down again before the first watch run replayed the
+	// last boot's note: no pane runs an agent CLI yet, and the note stays.
+	b = setup(t, "", "stopping")
+	b.OK("(as agent) tmux list-panes", "main:1.1\t100\t/home/agent/app\n")
+	b.OK("ps -u agent", "  100     1 -bash\n")
+	writeResume(t, b, Resume{Saved: night.Add(-10 * time.Minute), Boot: "boot-0", Panes: []ResumePane{{Pane: "main:1.1", Command: []string{"claude", "--continue"}}}})
+	NoteAtShutdown(ctx, b.e, night)
+	if r, ok := readResume(t, b); !ok || r.Boot != "boot-0" {
+		t.Errorf("an unreplayed note was dropped: %+v", r)
+	}
+
+	b = setup(t, "", "running")
+	writeResume(t, b, Resume{Saved: night.Add(-time.Hour), Boot: "boot-0"})
+	if got := NoteAtShutdown(ctx, b.e, night); !strings.Contains(got, "not shutting down (running)") {
+		t.Errorf("said %q", got)
+	}
+	if r, _ := readResume(t, b); r.Boot != "boot-0" {
+		t.Errorf("a stop within the boot replaced the note: %+v", r)
+	}
+
+	b = setup(t, "sessions:\n  recovery: false\n", "stopping")
+	if got := NoteAtShutdown(ctx, b.e, night); !strings.Contains(got, "sessions.recovery is off") {
+		t.Errorf("said %q", got)
+	}
+	if _, ok := readResume(t, b); ok {
+		t.Error("noted without session recovery")
+	}
+}
+
+// A soft reboot keeps the boot id and time, but the agent's tmux server
+// starts again with the panes: that is a reboot for the resume.
+func TestResumeAfterSoftReboot(t *testing.T) {
+	b := rebootBox(t, "")
+	bootIs(t, b, "boot-1")
+	if err := b.WriteFile("/proc/stat", []byte("btime "+strconv.FormatInt(night.Add(-48*time.Hour).Unix(), 10)+"\n"), 0o444, "root", "root"); err != nil {
+		t.Fatal(err)
+	}
+	writeResume(t, b, Resume{Saved: night, Boot: "boot-1", Panes: []ResumePane{{Pane: "main:1.1", Dir: "/home/agent", Command: []string{"claude", "--continue"}}}})
+	b.OK("(as agent) tmux list-panes", "main:1.1\tbash\t/home/agent\n")
+	b.OK("(as agent) tmux display-message -p #{start_time}", strconv.FormatInt(night.Add(-time.Hour).Unix(), 10)+"\n")
+	resumeConversations(context.Background(), b.e, night.Add(time.Minute))
+	if len(sent(b)) != 0 {
+		t.Fatalf("typed into a server that was there before the note: %q", sent(b))
+	}
+	b.OK("(as agent) tmux display-message -p #{start_time}", strconv.FormatInt(night.Add(time.Minute).Unix(), 10)+"\n")
+	resumeConversations(context.Background(), b.e, night.Add(2*time.Minute))
+	if got := sent(b); len(got) != 2 || got[0] != "-t main:1.1 -l -- claude --continue" {
+		t.Errorf("typed %q", got)
+	}
+}
+
+// lastCall is the last command run that starts with prefix.
+func lastCall(b *box, prefix string) system.Cmd {
+	var last system.Cmd
+	for _, c := range b.Calls {
+		if strings.HasPrefix(c.String(), prefix) {
+			last = c
+		}
+	}
+	return last
 }
 
 func writeResume(t *testing.T, b *box, r Resume) {
