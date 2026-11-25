@@ -397,10 +397,9 @@ func signInStates(ctx context.Context, cfg *config.Config, o options, only strin
 			if err != nil {
 				st.unchecked = a.sh.why(ctx, cfg, err)
 				// A box that does not answer, or whose host key is
-				// refused, is the same for every sign-in: said once.
-				var gone *noAnswer
-				var hk *hostKeyFixed
-				if errors.As(st.unchecked, &gone) || errors.As(st.unchecked, &hk) {
+				// refused or not confirmed, is the same for every
+				// sign-in: said, or asked, once.
+				if sameForEveryAccount(st.unchecked) {
 					down = st.unchecked
 				}
 			}
@@ -413,11 +412,18 @@ func signInStates(ctx context.Context, cfg *config.Config, o options, only strin
 
 // allDown is why no sign-in could be checked, when that is one reason for
 // all of them: the box does not answer. It is nil when any was checked.
-func allDown(states []signInState) error {
+// sameForEveryAccount is an error that comes from the box, not the
+// account: it does not answer, or its host key is refused or not
+// confirmed.
+func sameForEveryAccount(err error) bool {
 	var gone *noAnswer
 	var hk *hostKeyFixed
+	return errors.As(err, &gone) || errors.As(err, &hk) || errors.Is(err, provider.ErrHostKeyUnconfirmed)
+}
+
+func allDown(states []signInState) error {
 	for _, st := range states {
-		if st.unchecked == nil || !errors.As(st.unchecked, &gone) && !errors.As(st.unchecked, &hk) || st.unchecked.Error() != states[0].unchecked.Error() {
+		if st.unchecked == nil || !sameForEveryAccount(st.unchecked) || st.unchecked.Error() != states[0].unchecked.Error() {
 			return nil
 		}
 	}

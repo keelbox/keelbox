@@ -551,3 +551,26 @@ func TestRunSSHRefusedHostKey(t *testing.T) {
 		}
 	}
 }
+
+// A refused host key is the box's, not an account's: the sign-in checks
+// say it once, and every sign-in shows the same fix.
+func TestSignInStatesRefusedHostKey(t *testing.T) {
+	if _, err := exec.LookPath("ssh-keygen"); err != nil {
+		t.Skip("no ssh-keygen")
+	}
+	isolate(t)
+	cfg := labBox(t, "192.0.2.10", 22)
+	cfg.Target.SSH.HostKey = "SHA256:" + strings.Repeat("A", 43)
+	stub := stubSSH(t)
+	stub.write("ssh-keyscan", "#!/bin/sh\necho scan >> \"$KB_SSH_STUB/scans\"\ncat <<'KEYS'\n"+boxHostKey+"\nKEYS\n", 0o755)
+	portAnswers(t, nil)
+	var errOut bytes.Buffer
+	states := signInStates(context.Background(), cfg, options{}, "", &errOut)
+	down := allDown(states)
+	if len(states) < 2 || down == nil || !strings.HasSuffix(down.Error(), "Then check keelbox connects: keelbox status "+cfg.Box) {
+		t.Fatalf("%d states, down %v", len(states), down)
+	}
+	if b, _ := os.ReadFile(filepath.Join(stub.dir, "scans")); strings.Count(string(b), "scan") > 2 {
+		t.Errorf("the host key was fetched once per sign-in:\n%s", b)
+	}
+}

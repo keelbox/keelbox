@@ -458,6 +458,12 @@ func TestResumeKeepsTheSnapshotUntilAnApplyPassed(t *testing.T) {
 	if code != 1 || len(w.api.Images) != 1 || len(w.applied) != 1 || !strings.Contains(out, "snapshot 1001 is kept until an apply has passed") {
 		t.Fatalf("no answer: exit %d\n%s", code, out)
 	}
+	// A refused host key after the wait ends with the fix in the config.
+	w.waitErr = &provider.HostKeyError{Host: "203.0.113.9", Want: "SHA256:" + strings.Repeat("A", 43)}
+	code, out = w.do(t, "resume", options{}, nil)
+	if code != 1 || !strings.Contains(out, "under target.ssh, set host_key:") || !strings.Contains(out, "keelbox status acme") {
+		t.Fatalf("host key refused: exit %d\n%s", code, out)
+	}
 	w.waitErr = nil
 	code, out = w.do(t, "resume", options{}, nil)
 	if code != 0 || len(w.api.Images) != 0 || len(w.api.Servers) != 1 || len(w.api.Created) != 1 {
