@@ -26,6 +26,9 @@ import (
 type shell struct {
 	ssh  *provider.SSH // nil: this machine is the box
 	user string
+	// configFile is the config the command was given, "" for the box's
+	// own in the registry: an error names it.
+	configFile string
 }
 
 // boxShell reaches the box as user. ssh logs in as user directly: agent
@@ -40,7 +43,7 @@ func boxShell(ctx context.Context, cfg *config.Config, o options, user string, s
 		return &shell{user: user}, nil
 	case config.ProviderSSH:
 		a := reach(ctx, cfg, addr{cfg.Target.SSH.Host, cfg.Target.SSH.Port}, stderr)
-		return &shell{ssh: sshTarget(cfg, a, o, stdout, stderr).As(user), user: user}, nil
+		return &shell{ssh: sshTarget(cfg, a, o, stdout, stderr).As(user), user: user, configFile: o.configFile}, nil
 	}
 	if isCloud(cfg.Target.Provider) {
 		cl, err := openCloudKnown(ctx, cfg, o, terminalPrompt(ctx, stdout, o.style), boxRef(cfg, o.configFile), stdout)
@@ -51,7 +54,7 @@ func boxShell(ctx context.Context, cfg *config.Config, o options, user string, s
 		if err != nil {
 			return nil, err
 		}
-		return &shell{ssh: sshTarget(cfg, reach(ctx, cfg, public, stderr), o, stdout, stderr).As(user), user: user}, nil
+		return &shell{ssh: sshTarget(cfg, reach(ctx, cfg, public, stderr), o, stdout, stderr).As(user), user: user, configFile: o.configFile}, nil
 	}
 	return nil, fmt.Errorf("unknown provider %q", cfg.Target.Provider)
 }
@@ -167,7 +170,7 @@ func (s *shell) exitCode(ctx context.Context, remote string) int {
 
 // why words the reason a check on the box could not run.
 func (s *shell) why(ctx context.Context, cfg *config.Config, err error) error {
-	return sshFailure(ctx, err, cfg, s.ssh, options{}, "")
+	return sshFailure(ctx, err, cfg, s.ssh, options{configFile: s.configFile}, "")
 }
 
 func (s *shell) output(ctx context.Context, remote string) (string, error) {
@@ -393,8 +396,10 @@ func signInStates(ctx context.Context, cfg *config.Config, o options, only strin
 			ok, err := a.sh.succeeds(ctx, si.status)
 			if err != nil {
 				st.unchecked = a.sh.why(ctx, cfg, err)
-				var gone *noAnswer
-				if errors.As(st.unchecked, &gone) {
+				// A box that does not answer, or whose host key is
+				// refused or not confirmed, is the same for every
+				// sign-in: said, or asked, once.
+				if sameForEveryAccount(st.unchecked) {
 					down = st.unchecked
 				}
 			}
@@ -407,10 +412,18 @@ func signInStates(ctx context.Context, cfg *config.Config, o options, only strin
 
 // allDown is why no sign-in could be checked, when that is one reason for
 // all of them: the box does not answer. It is nil when any was checked.
-func allDown(states []signInState) error {
+// sameForEveryAccount is an error that comes from the box, not the
+// account: it does not answer, or its host key is refused or not
+// confirmed.
+func sameForEveryAccount(err error) bool {
 	var gone *noAnswer
+	var hk *hostKeyFixed
+	return errors.As(err, &gone) || errors.As(err, &hk) || errors.Is(err, provider.ErrHostKeyUnconfirmed)
+}
+
+func allDown(states []signInState) error {
 	for _, st := range states {
-		if st.unchecked == nil || !errors.As(st.unchecked, &gone) || st.unchecked.Error() != states[0].unchecked.Error() {
+		if st.unchecked == nil || !sameForEveryAccount(st.unchecked) || st.unchecked.Error() != states[0].unchecked.Error() {
 			return nil
 		}
 	}
@@ -921,6 +934,10 @@ func afterAttach(box, again string) string {
 // line from keelbox when ssh could not start it or lost it (sessionFailure,
 // sessionCutOff). again is the command that opens the session again.
 func sessionExit(ctx context.Context, err error, sh *shell, box, again string, stderr io.Writer) int {
+	var hk *provider.HostKeyError
+	if errors.As(err, &hk) && ctx.Err() == nil {
+		return exitCode(hostKeyFix(hk, box, sh.configFile), stderr)
+	}
 	return exitCode(sessionCutOff(ctx, sessionFailure(ctx, err, sh.ssh), err, sh.ssh, box, again), stderr)
 }
 

@@ -243,11 +243,25 @@ func TestSSHFailureEndsWithTheFix(t *testing.T) {
 			err: keyscan, user: "admin", cmd: "apply",
 			want: "192.0.2.10 answers on port 22 but offered no SSH host key to pin (ssh-keyscan 192.0.2.10: exit status 1). Check SSH runs there: ssh admin@192.0.2.10 true",
 		},
-		"keelbox on the box failed":   {err: exitStatus(1), user: "admin", cmd: "doctor", keeps: true},
-		"not ssh":                     {err: errors.New("no keelbox binary for arm64"), user: "admin", cmd: "plan", keeps: true},
-		"the command on the box":      {err: errors.New("ssh admin@192.0.2.10: exit status 1: cat: nothing"), user: "admin", keeps: true},
-		"a host key nobody confirmed": {err: &provider.HostKeyError{Host: "192.0.2.10"}, user: "admin", cmd: "plan", keeps: true},
+		"keelbox on the box failed": {err: exitStatus(1), user: "admin", cmd: "doctor", keeps: true},
+		"not ssh":                   {err: errors.New("no keelbox binary for arm64"), user: "admin", cmd: "plan", keeps: true},
+		"the command on the box":    {err: errors.New("ssh admin@192.0.2.10: exit status 1: cat: nothing"), user: "admin", keeps: true},
+		"a host key nobody confirmed": {
+			err: &provider.HostKeyError{Host: "192.0.2.10", Offered: []provider.HostKey{{Type: "ssh-ed25519", Blob: "AAAAC3NzaC1lZDI1NTE5AAAAIKeelbox"}}}, user: "admin", cmd: "plan",
+			want: "192.0.2.10 is not a host keelbox has connected to, and no terminal is attached to confirm its host key. It offers " + hostKeyFP + " (ssh-ed25519). " +
+				"Read the server's key in the provider's console, or ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the server. In ~/.config/keelbox/boxes/lab.yaml, under target.ssh, set host_key: SHA256:... to that key. Then check keelbox connects: keelbox status lab",
+		},
+		"a host key other than the pinned one": {
+			err: &provider.HostKeyError{Host: "192.0.2.10", Want: "SHA256:" + strings.Repeat("A", 43), Offered: []provider.HostKey{{Type: "ssh-ed25519", Blob: "AAAAC3NzaC1lZDI1NTE5AAAAIKeelbox"}}}, user: "admin", cmd: "apply",
+			want: "192.0.2.10 does not offer the host key SHA256:" + strings.Repeat("A", 43) + " that target.ssh.host_key pins; it offers " + hostKeyFP + " (ssh-ed25519). keelbox did not connect; if the server was reinstalled, that is expected. " +
+				"Read the server's key in the provider's console, or ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the server. In ~/.config/keelbox/boxes/lab.yaml, under target.ssh, set host_key: SHA256:... to that key. Then check keelbox connects: keelbox status lab",
+		},
 	} {
+		if hk := (*provider.HostKeyError)(nil); errors.As(c.err, &hk) {
+			if got := sshFailure(context.Background(), c.err, cfg, sshTarget(cfg, addr{"192.0.2.10", 22}, options{}, io.Discard, io.Discard), c.o, c.cmd); !errors.As(got, &hk) {
+				t.Errorf("%s: the refusal is no longer found in %T", name, got)
+			}
+		}
 		portAnswers(t, c.port)
 		s := sshTarget(cfg, addr{"192.0.2.10", 22}, options{}, io.Discard, io.Discard).As(c.user)
 		got := sshFailure(context.Background(), c.err, cfg, s, c.o, c.cmd)
@@ -487,5 +501,76 @@ func TestCutOffAndTheTerminalRestore(t *testing.T) {
 	// The cursor is saved before the alternate screen is left.
 	if !strings.HasPrefix(terminalRestore, "\x1b7\x1b[?1049l") {
 		t.Errorf("the restore starts %q", terminalRestore[:12])
+	}
+}
+
+// hostKeyFP is the fingerprint of the host key the refusals above offer.
+var hostKeyFP = provider.HostKey{Type: "ssh-ed25519", Blob: "AAAAC3NzaC1lZDI1NTE5AAAAIKeelbox"}.Fingerprint()
+
+// A refused host key ends with the same fix whatever reached it: a command
+// that named no command to run again, a config outside the registry, and
+// a session on the terminal.
+func TestHostKeyFixOnEveryPath(t *testing.T) {
+	cfg := setUpBox(t)
+	hk := &provider.HostKeyError{Host: "192.0.2.10", Offered: []provider.HostKey{{Type: "ssh-ed25519", Blob: "AAAAC3NzaC1lZDI1NTE5AAAAIKeelbox"}}}
+	s := sshTarget(cfg, addr{"192.0.2.10", 22}, options{}, io.Discard, io.Discard)
+	const end = "set host_key: SHA256:... to that key. Then check keelbox connects: keelbox status "
+	got := sshFailure(context.Background(), hk, cfg, s, options{}, "").Error()
+	if !strings.HasSuffix(got, "In ~/.config/keelbox/boxes/"+cfg.Box+".yaml, under target.ssh, "+end+cfg.Box) {
+		t.Errorf("no command given: %s", got)
+	}
+	other := filepath.Join(t.TempDir(), "lab.yaml")
+	got = sshFailure(context.Background(), hk, cfg, s, options{configFile: other}, "plan").Error()
+	if !strings.Contains(got, "In "+other+", under target.ssh, ") || !strings.HasSuffix(got, end+other) {
+		t.Errorf("a config outside the registry: %s", got)
+	}
+	var stderr strings.Builder
+	sessionExit(context.Background(), hk, &shell{ssh: s, user: "admin"}, cfg.Box, "keelbox attach "+cfg.Box, &stderr)
+	if !strings.Contains(stderr.String(), end+cfg.Box) {
+		t.Errorf("a session: %s", stderr.String())
+	}
+}
+
+// Every command that runs keelbox on the box over SSH ends a refused host
+// key with the fix, not only those that pin the key before they run it.
+func TestRunSSHRefusedHostKey(t *testing.T) {
+	if _, err := exec.LookPath("ssh-keygen"); err != nil {
+		t.Skip("no ssh-keygen")
+	}
+	isolate(t)
+	cfg := labBox(t, "192.0.2.10", 22)
+	cfg.Target.SSH.HostKey = "SHA256:" + strings.Repeat("A", 43)
+	stub := stubSSH(t)
+	stub.write("ssh-keyscan", "#!/bin/sh\ncat <<'KEYS'\n"+boxHostKey+"\nKEYS\n", 0o755)
+	portAnswers(t, nil)
+	for _, cmd := range []string{"plan", "doctor", "status", "backup"} {
+		var out, errOut bytes.Buffer
+		runSSH(context.Background(), cmd, cfg, addr{"192.0.2.10", 22}, options{}, &out, &errOut)
+		if got := errOut.String(); !strings.Contains(got, "that target.ssh.host_key pins") || !strings.HasSuffix(strings.TrimSpace(got), "Then check keelbox connects: keelbox status "+cfg.Box) {
+			t.Errorf("%s:\n%s", cmd, got)
+		}
+	}
+}
+
+// A refused host key is the box's, not an account's: the sign-in checks
+// say it once, and every sign-in shows the same fix.
+func TestSignInStatesRefusedHostKey(t *testing.T) {
+	if _, err := exec.LookPath("ssh-keygen"); err != nil {
+		t.Skip("no ssh-keygen")
+	}
+	isolate(t)
+	cfg := labBox(t, "192.0.2.10", 22)
+	cfg.Target.SSH.HostKey = "SHA256:" + strings.Repeat("A", 43)
+	stub := stubSSH(t)
+	stub.write("ssh-keyscan", "#!/bin/sh\necho scan >> \"$KB_SSH_STUB/scans\"\ncat <<'KEYS'\n"+boxHostKey+"\nKEYS\n", 0o755)
+	portAnswers(t, nil)
+	var errOut bytes.Buffer
+	states := signInStates(context.Background(), cfg, options{}, "", &errOut)
+	down := allDown(states)
+	if len(states) < 2 || down == nil || !strings.HasSuffix(down.Error(), "Then check keelbox connects: keelbox status "+cfg.Box) {
+		t.Fatalf("%d states, down %v", len(states), down)
+	}
+	if b, _ := os.ReadFile(filepath.Join(stub.dir, "scans")); strings.Count(string(b), "scan") > 2 {
+		t.Errorf("the host key was fetched once per sign-in:\n%s", b)
 	}
 }

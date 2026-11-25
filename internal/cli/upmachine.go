@@ -173,13 +173,15 @@ func (w *wizard) inspectServer(ctx context.Context, a *answers) error {
 	return nil
 }
 
+// compareHostKey is where the user reads a server's host key to compare.
+const compareHostKey = "the provider's console, or ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the server"
+
 // connectFix ends an error from the first connection that another flag
 // resolves with the command to run: the account the server's image names,
 // or the server's host key. Before the box's config is written there is no
 // target.ssh.host_key to set, so the fix is a flag. A fingerprint is never
 // filled in from what the server offered: comparing it is the user's step.
 func (w *wizard) connectFix(err error) error {
-	const compare = "the provider's console, or ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the server"
 	var acct *wrongAccount
 	var hk *provider.HostKeyError
 	switch {
@@ -188,12 +190,12 @@ func (w *wizard) connectFix(err error) error {
 	case errors.As(err, &hk) && hk.Want != "":
 		// A key that is not the one asked for is not offered as the answer.
 		return fmt.Errorf("%s does not offer the host key %s given for it; it offers %s. keelbox did not connect. Read the server's key in %s, and pass that one: %s",
-			hk.Host, hk.Want, hk.Fingerprints(), compare, w.upCommand(map[string]string{"host-key": hostKeyPlaceholder}))
+			hk.Host, hk.Want, hk.Fingerprints(), compareHostKey, w.upCommand(map[string]string{"host-key": hostKeyPlaceholder}))
 	case errors.As(err, &hk):
 		// What it offers is listed, not filled in: nobody has compared it
 		// yet, and a command that runs as printed would skip that step.
 		return fmt.Errorf("%s is not a host keelbox has connected to, and no terminal is attached to confirm its host key. It offers %s. Read the server's key in %s; if it is one of these, pass it: %s",
-			hk.Host, hk.Fingerprints(), compare, w.upCommand(map[string]string{"host-key": hostKeyPlaceholder}))
+			hk.Host, hk.Fingerprints(), compareHostKey, w.upCommand(map[string]string{"host-key": hostKeyPlaceholder}))
 	}
 	return err
 }

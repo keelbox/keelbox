@@ -209,7 +209,7 @@ func waitForBox(ctx context.Context, cfg *config.Config, public addr, stdout, st
 	}
 	s := sshTarget(cfg, a, options{}, stdout, stderr)
 	if err := s.TrustHost(ctx); err != nil {
-		return err
+		return err // the caller says the fix for a refused key: it knows the config given
 	}
 	if err := s.WaitReachable(ctx, 3*time.Minute); err != nil {
 		return err
@@ -561,7 +561,7 @@ func cloudResume(ctx context.Context, cl cloud, cfg *config.Config, o options, l
 	kept := fmt.Sprintf("%s is kept until an apply has passed. Fix the cause above, then: keelbox resume %s", pk.ref, ref)
 	if err := boxComesBack(ctx, cfg, public, stdout, stderr); err != nil {
 		v.failed()
-		fmt.Fprintln(stderr, "keelbox:", err)
+		fmt.Fprintln(stderr, "keelbox:", hostKeyIn(err, cfg.Box, o.configFile))
 		fmt.Fprintf(stderr, "keelbox: %s\n", kept)
 		return 1
 	}

@@ -52,7 +52,7 @@ SSH at the public address is refused and the tailnet does not reach the box. Fol
 ssh-keygen -R 203.0.113.10 -f ~/.config/keelbox/known_hosts
 ```
 
-`does not offer the pinned host key` means the key differs from `target.ssh.host_key`. Set that key to the server's new one.
+`does not offer the host key ... that target.ssh.host_key pins` means the server's key differs from the one in the box's config. If the server was reinstalled, compare its new key, then set `host_key` under `target.ssh` in the file the message names.
 
 ### Permission denied (publickey)
 
