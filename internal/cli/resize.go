@@ -350,7 +350,7 @@ func cloudResize(ctx context.Context, cl cloud, cfg *config.Config, o options, p
 	v.say("%s is %s and running at %s; waiting for SSH", srv.ref, to.name, srv.ip)
 	if err := boxComesBack(ctx, cfg, public, stdout, stderr); err != nil {
 		v.failed()
-		fmt.Fprintln(stderr, "keelbox:", err)
+		fmt.Fprintln(stderr, "keelbox:", hostKeyIn(err, cfg.Box, o.configFile))
 		fmt.Fprintf(stderr, "keelbox: %s is %s now. Once it answers: keelbox apply %s\n", box, to.name, ref)
 		return 1
 	}

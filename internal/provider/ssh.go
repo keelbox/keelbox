@@ -362,7 +362,14 @@ func ShipConfig(c *config.Config) (*config.Config, []Secret, error) {
 // there. It keeps the message and drops the wrapped *exec.ExitError: a
 // caller that finds one takes its code for keelbox's own on the box, which
 // has already explained itself, and prints nothing (a failed scp exits 1).
-func setupErr(err error) error { return errors.New(err.Error()) }
+// A refused host key is kept as it is, so the caller can say the fix.
+func setupErr(err error) error {
+	var hk *HostKeyError
+	if errors.As(err, &hk) || errors.Is(err, ErrHostKeyUnconfirmed) {
+		return err
+	}
+	return errors.New(err.Error())
+}
 
 // Run uploads keelbox and the config and runs `keelbox <command>` on the box
 // as root. The staged auth key is deleted whatever the outcome.

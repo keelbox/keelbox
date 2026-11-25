@@ -401,6 +401,16 @@ func hostKeyFix(hk *provider.HostKeyError, box, configFile string) error {
 		why, compareHostKey, tildePath(path), hostKeyPlaceholder, ref)}
 }
 
+// hostKeyIn gives a refused host key in err its fix, and returns any other
+// error as it is.
+func hostKeyIn(err error, box, configFile string) error {
+	var hk *provider.HostKeyError
+	if errors.As(err, &hk) {
+		return hostKeyFix(hk, box, configFile)
+	}
+	return err
+}
+
 // hostKeyFixed is a refused host key with its fix; it unwraps to the
 // refusal, so callers that say more about it (connectFix) still find it.
 type hostKeyFixed struct {

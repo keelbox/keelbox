@@ -396,8 +396,11 @@ func signInStates(ctx context.Context, cfg *config.Config, o options, only strin
 			ok, err := a.sh.succeeds(ctx, si.status)
 			if err != nil {
 				st.unchecked = a.sh.why(ctx, cfg, err)
+				// A box that does not answer, or whose host key is
+				// refused, is the same for every sign-in: said once.
 				var gone *noAnswer
-				if errors.As(st.unchecked, &gone) {
+				var hk *hostKeyFixed
+				if errors.As(st.unchecked, &gone) || errors.As(st.unchecked, &hk) {
 					down = st.unchecked
 				}
 			}
@@ -412,8 +415,9 @@ func signInStates(ctx context.Context, cfg *config.Config, o options, only strin
 // all of them: the box does not answer. It is nil when any was checked.
 func allDown(states []signInState) error {
 	var gone *noAnswer
+	var hk *hostKeyFixed
 	for _, st := range states {
-		if st.unchecked == nil || !errors.As(st.unchecked, &gone) || st.unchecked.Error() != states[0].unchecked.Error() {
+		if st.unchecked == nil || !errors.As(st.unchecked, &gone) && !errors.As(st.unchecked, &hk) || st.unchecked.Error() != states[0].unchecked.Error() {
 			return nil
 		}
 	}

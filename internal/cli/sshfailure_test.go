@@ -530,3 +530,24 @@ func TestHostKeyFixOnEveryPath(t *testing.T) {
 		t.Errorf("a session: %s", stderr.String())
 	}
 }
+
+// Every command that runs keelbox on the box over SSH ends a refused host
+// key with the fix, not only those that pin the key before they run it.
+func TestRunSSHRefusedHostKey(t *testing.T) {
+	if _, err := exec.LookPath("ssh-keygen"); err != nil {
+		t.Skip("no ssh-keygen")
+	}
+	isolate(t)
+	cfg := labBox(t, "192.0.2.10", 22)
+	cfg.Target.SSH.HostKey = "SHA256:" + strings.Repeat("A", 43)
+	stub := stubSSH(t)
+	stub.write("ssh-keyscan", "#!/bin/sh\ncat <<'KEYS'\n"+boxHostKey+"\nKEYS\n", 0o755)
+	portAnswers(t, nil)
+	for _, cmd := range []string{"plan", "doctor", "status", "backup"} {
+		var out, errOut bytes.Buffer
+		runSSH(context.Background(), cmd, cfg, addr{"192.0.2.10", 22}, options{}, &out, &errOut)
+		if got := errOut.String(); !strings.Contains(got, "that target.ssh.host_key pins") || !strings.HasSuffix(strings.TrimSpace(got), "Then check keelbox connects: keelbox status "+cfg.Box) {
+			t.Errorf("%s:\n%s", cmd, got)
+		}
+	}
+}
