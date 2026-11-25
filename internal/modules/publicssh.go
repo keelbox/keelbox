@@ -370,11 +370,11 @@ func verifyPublicSSH(ctx context.Context, e *engine.Env) []engine.Finding {
 		}
 	}
 	admin := e.Cfg.Users.Admin.Name
-	public, _ := system.Output(ctx, e.X, system.C("sshd", "-T", "-C", "user="+admin+",host=keelbox-check,addr=192.0.2.1,laddr=192.0.2.2,lport=22"))
-	tailnet, _ := system.Output(ctx, e.X, system.C("sshd", "-T", "-C", "user="+admin+",host=keelbox-check,addr=100.64.0.1,laddr="+p.proof.Address+",lport=22"))
+	public, _ := sshdTest(ctx, e.X, "-C", "user="+admin+",host=keelbox-check,addr=192.0.2.1,laddr=192.0.2.2,lport=22")
+	tailnet, _ := sshdTest(ctx, e.X, "-C", "user="+admin+",host=keelbox-check,addr=100.64.0.1,laddr="+p.proof.Address+",lport=22")
 	fromLAN := ""
 	if lan {
-		fromLAN, _ = system.Output(ctx, e.X, system.C("sshd", "-T", "-C", "user="+admin+",host=keelbox-check,addr=192.168.1.10,laddr=192.0.2.2,lport=22"))
+		fromLAN, _ = sshdTest(ctx, e.X, "-C", "user="+admin+",host=keelbox-check,addr=192.168.1.10,laddr=192.0.2.2,lport=22")
 	}
 	switch {
 	case lan && strings.Contains(fromLAN, "denyusers *"):
