@@ -64,11 +64,11 @@ func TestKeysGateSecondComputer(t *testing.T) {
 	}
 	got := stderr.String()
 	for _, want := range []string{
-		"this apply would take 2 SSH keys off acme that an apply put there. Nothing has changed.",
-		"If they belonged to a computer you no longer use: keelbox apply acme --remove-keys\nTo keep them, add these lines",
+		"this apply would take 1 SSH key off acme that an apply put there. Nothing has changed.",
+		"If it belonged to a computer you no longer use: keelbox apply acme --remove-keys\nTo keep it, add each line under the account's ssh_authorized_keys",
 		"  users.admin: ssh-ed25519 SHA256:",
 		" laptop-a\n  users.agent: ssh-ed25519 SHA256:",
-		"  users:\n    admin:\n      ssh_authorized_keys:\n        - \"" + laptopA + "\"\n    agent:\n      ssh_authorized_keys:\n        - \"" + laptopA + "\"\n",
+		"  under users.admin.ssh_authorized_keys:\n    - \"" + laptopA + "\"\n  under users.agent.ssh_authorized_keys:\n    - \"" + laptopA + "\"\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("message lacks %q:\n%s", want, got)
@@ -161,7 +161,7 @@ func TestKeysRecordAcrossApplies(t *testing.T) {
 	}
 	// A applies its config with A alone: B would come off.
 	e = &engine.Env{X: x, Cfg: cfg(laptopA)}
-	if keysGate(e, false, &stderr) || !strings.Contains(stderr.String(), "take 2 SSH keys off") || !strings.Contains(stderr.String(), "laptop-b") {
+	if keysGate(e, false, &stderr) || !strings.Contains(stderr.String(), "take 1 SSH key off") || !strings.Contains(stderr.String(), "laptop-b") {
 		t.Fatalf("an apply after a partial one took the key off unasked:\n%s", stderr.String())
 	}
 	// With --remove-keys the apply goes ahead, passes, and records A alone.
@@ -191,5 +191,55 @@ func TestKeysRecordAcrossApplies(t *testing.T) {
 func TestRemoveKeysReachesTheBox(t *testing.T) {
 	if got := strings.Join(remoteExtra(options{removeKeys: true}), " "); !strings.Contains(got, "--remove-keys") {
 		t.Errorf("remote arguments %q", got)
+	}
+}
+
+// The apply sequence: the check again under the lock, the union recorded
+// before the steps, the keys alone once apply passed. A failed apply keeps
+// the union; with --remove-keys the keys it takes off are not kept for it,
+// so a step that fails later does not make every next apply stop.
+func TestApplyKeepingKeys(t *testing.T) {
+	cfg := func(keys ...string) *config.Config {
+		c := &config.Config{Box: "acme"}
+		c.Users.Admin.SSHAuthorizedKeys = keys
+		c.Users.Agent.SSHAuthorizedKeys = keys
+		return c
+	}
+	record := func(x *system.Fake) string {
+		data, _ := x.ReadFile(KeysRecord)
+		return string(data)
+	}
+	var stderr bytes.Buffer
+
+	// B adds its key; a later step fails: both stay recorded, and A's
+	// apply without B stops before its steps run.
+	x := system.NewFake()
+	lastApplied(t, x, laptopA)
+	ran := false
+	if code := applyKeepingKeys(&engine.Env{X: x, Cfg: cfg(laptopA, laptopB)}, false, &stderr, func() int { ran = true; return 1 }); code != 1 || !ran {
+		t.Fatalf("exit %d, ran %v", code, ran)
+	}
+	if r := record(x); !strings.Contains(r, "laptop-a") || !strings.Contains(r, "laptop-b") {
+		t.Fatalf("record after a failed apply:\n%s", r)
+	}
+	ran = false
+	if code := applyKeepingKeys(&engine.Env{X: x, Cfg: cfg(laptopA)}, false, &stderr, func() int { ran = true; return 0 }); code != 1 || ran {
+		t.Fatalf("A's apply went ahead: exit %d, ran %v\n%s", code, ran, stderr.String())
+	}
+
+	// --remove-keys, and the agents step fails: B is not kept, and the
+	// next apply goes ahead without the flag.
+	stderr.Reset()
+	if code := applyKeepingKeys(&engine.Env{X: x, Cfg: cfg(laptopA)}, true, &stderr, func() int { return 1 }); code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	if r := record(x); strings.Contains(r, "laptop-b") {
+		t.Fatalf("--remove-keys kept the key:\n%s", r)
+	}
+	if code := applyKeepingKeys(&engine.Env{X: x, Cfg: cfg(laptopA)}, false, &stderr, func() int { return 0 }); code != 0 {
+		t.Fatalf("the next apply stopped: exit %d\n%s", code, stderr.String())
+	}
+	if fi := x.Files[KeysRecord]; fi == nil || fi.Mode != 0o600 || fi.Owner != "root" {
+		t.Errorf("record file %+v", fi)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -131,24 +132,12 @@ func runLocal(ctx context.Context, cmd string, cfg *config.Config, o options, st
 		if !firstApplyGate(ctx, env, modules.All(), stderr) {
 			return 1
 		}
-		// Every key this apply may put on the box is in root's record
-		// before any step runs, so an apply that stops partway cannot let
-		// the next one take a key off unasked (ADR 0097).
-		if err := recordKeys(env, true); err != nil {
-			fail(stderr, fmt.Errorf("recording the SSH keys before the apply: %w", err))
-			return 1
-		}
-		out, errOut, done := applyView(resolved, o, stdout, stderr)
-		defer done()
-		env.Log = out
-		code := Apply(ctx, env, modules.All(), from, out, errOut)
-		if code == 0 {
-			if err := recordKeys(env, false); err != nil {
-				fail(stderr, fmt.Errorf("recording the SSH keys after the apply: %w", err))
-				return 1
-			}
-		}
-		return code
+		return applyKeepingKeys(env, o.removeKeys, stderr, func() int {
+			out, errOut, done := applyView(resolved, o, stdout, stderr)
+			defer done()
+			env.Log = out
+			return Apply(ctx, env, modules.All(), from, out, errOut)
+		})
 	case "doctor":
 		return Doctor(ctx, env, modules.All(), stdout)
 	case "status":
@@ -217,6 +206,13 @@ func rollback(ctx context.Context, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if err := replaceExecutable(provider.RemoteBinary, prev); err != nil {
+		failf(stderr, "rollback: %v", err)
+		return 1
+	}
+	// Rollback goes back to the last config applied in full, keys
+	// included: the keys a failed apply added since are not kept for it,
+	// and an older keelbox does not know --remove-keys (ADR 0097).
+	if err := os.Remove(KeysRecord); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		failf(stderr, "rollback: %v", err)
 		return 1
 	}

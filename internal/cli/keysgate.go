@@ -113,9 +113,10 @@ type removedKey struct {
 // the box that its last apply put there, unless --remove-keys says so. The
 // keys from ssh_authorized_key_files are read where keelbox runs, so the
 // same config applied from a second computer would otherwise replace the
-// first computer's key with its own and lock the first one out. The last
-// apply's keys come from the config it left in /etc/keelbox, which only
-// root can change; the agent's own authorized_keys does not count.
+// first computer's key with its own and lock the first one out. The keys
+// applies put there come from root's record (KeysRecord), or on a box set
+// up before it, from the config the last apply left in /etc/keelbox; the
+// agent's own authorized_keys does not count.
 func keysGate(e *engine.Env, removeKeys bool, stderr io.Writer) bool {
 	if removeKeys {
 		return true
@@ -125,8 +126,12 @@ func keysGate(e *engine.Env, removeKeys bool, stderr io.Writer) bool {
 		return true
 	}
 	box := e.Cfg.Box
-	one := len(gone) == 1
-	failf(stderr, "this apply would take %s off %s that an apply put there. Nothing has changed.\n", plural(len(gone), "SSH key", "SSH keys"), box)
+	distinct := map[string]bool{}
+	for _, k := range gone {
+		distinct[keyBlob(k.key)] = true
+	}
+	one := len(distinct) == 1
+	failf(stderr, "this apply would take %s off %s that an apply put there. Nothing has changed.\n", plural(len(distinct), "SSH key", "SSH keys"), box)
 	for _, k := range gone {
 		fmt.Fprintf(stderr, "  %s: %s\n", k.account, keyLabel(k.key))
 	}
@@ -135,7 +140,7 @@ func keysGate(e *engine.Env, removeKeys bool, stderr io.Writer) bool {
 		it, them = "they", "them"
 	}
 	fmt.Fprintf(stderr, "\nA key comes off when ssh_authorized_key_files names a file that holds another key on this computer, as on a second computer, or when it was taken out of the config. If %s belonged to a computer you no longer use: keelbox apply %s --remove-keys\n", it, box)
-	fmt.Fprintf(stderr, "To keep %s, add these lines to the box's config on this computer:\n\n", them)
+	fmt.Fprintf(stderr, "To keep %s, add each line under the account's ssh_authorized_keys in the box's config on this computer:\n\n", them)
 	fmt.Fprint(stderr, keepKeysYAML(gone))
 	fmt.Fprintf(stderr, "\nThen: keelbox apply %s\n", box)
 	return false
@@ -201,10 +206,9 @@ func keyLabel(line string) string {
 	return label
 }
 
-// keepKeysYAML is the config that keeps the keys, account by account.
+// keepKeysYAML is a list item per key, under the account it is for.
 func keepKeysYAML(gone []removedKey) string {
 	var b strings.Builder
-	b.WriteString("  users:\n")
 	for _, acct := range []string{"users.admin", "users.agent"} {
 		var keys []string
 		for _, k := range gone {
@@ -215,10 +219,34 @@ func keepKeysYAML(gone []removedKey) string {
 		if len(keys) == 0 {
 			continue
 		}
-		fmt.Fprintf(&b, "    %s:\n      ssh_authorized_keys:\n", strings.TrimPrefix(acct, "users."))
+		fmt.Fprintf(&b, "  under %s.ssh_authorized_keys:\n", acct)
 		for _, k := range keys {
-			fmt.Fprintf(&b, "        - %q\n", k)
+			fmt.Fprintf(&b, "    - %q\n", k)
 		}
 	}
 	return b.String()
+}
+
+// applyKeepingKeys runs apply under the lock with root's record of the
+// keys around it. The check runs again here, under the lock: another
+// apply may have recorded a key since the first look. Every key this
+// apply may put on the box is recorded before any step runs, so one that
+// stops partway cannot let the next take a key off unasked; with
+// --remove-keys only this config's keys are, since the user asked for the
+// others to come off. Once apply has passed, the record is its keys alone.
+func applyKeepingKeys(e *engine.Env, removeKeys bool, stderr io.Writer, apply func() int) int {
+	if !keysGate(e, removeKeys, stderr) {
+		return 1
+	}
+	if err := recordKeys(e, !removeKeys); err != nil {
+		failf(stderr, "recording the SSH keys before the apply: %v. Nothing has changed. Check that root can write %s (sudo ls -ld /etc/keelbox), then: keelbox apply %s\n", err, KeysRecord, e.Cfg.Box)
+		return 1
+	}
+	code := apply()
+	if code == 0 {
+		if err := recordKeys(e, false); err != nil {
+			fmt.Fprintf(stderr, "keelbox: warning: the apply passed, but recording its SSH keys failed (%v); the next apply may stop for a key it took off: keelbox apply %s --remove-keys passes it\n", err, e.Cfg.Box)
+		}
+	}
+	return code
 }
