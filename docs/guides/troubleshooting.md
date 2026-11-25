@@ -122,6 +122,10 @@ Give the server IPv4 internet access (in your provider's console, or on its netw
 keelbox apply acme
 ```
 
+### Apply would take SSH keys off
+
+`this apply would take 1 SSH key off acme that its last apply put there` means the config lists fewer keys than the box has from its last apply. It is usually the same config applied from a second computer: `ssh_authorized_key_files` is read on the computer that runs keelbox, so `~/.ssh/id_ed25519.pub` is another key there. Nothing has changed. To keep the key, add the lines the message prints under `ssh_authorized_keys` and apply again. To take it off, for a lost laptop say, run `keelbox apply acme --remove-keys`. Setting up a second computer: [from a second computer](sessions.md#from-a-second-computer).
+
 ### Another keelbox apply is running
 
 An apply started on the box holds the lock. Wait, or look for a stuck one:

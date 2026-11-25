@@ -81,6 +81,9 @@ func remoteExtra(o options) []string {
 	if o.adopt {
 		extra = append(extra, "--adopt")
 	}
+	if o.removeKeys {
+		extra = append(extra, "--remove-keys")
+	}
 	if o.impact {
 		extra = append(extra, "--impact")
 	}

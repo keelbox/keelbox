@@ -324,6 +324,7 @@ Flags:
   --adopt            accept what plan --impact marks on a machine in use, such as replacing Ubuntu's
                      docker.io
   --allow-downgrade  move the box to an older release
+  --remove-keys      take off SSH keys this config no longer lists
 ```
 <!-- keelbox apply --help: end -->
 
@@ -332,6 +333,7 @@ Each step is checked, changed if needed and checked again. A failed step stops t
 - With provider `ssh` and an `--ssh-user` other than `target.ssh.user`, apply runs twice: as that account, then as the admin. The second run locks [the image's default account](../guides/adopting-a-box.md#the-images-default-account).
 - In an LXC container without nesting, or without `/dev/net/tun` while Tailscale is on, apply stops before any change, exit 1, and prints the commands for the container's host: [an LXC container](../guides/troubleshooting.md#an-lxc-container).
 - An apply on a box never set up stops before any change, exit 1, when [it cannot reach github.com](../guides/troubleshooting.md#the-box-cannot-reach-github).
+- Apply stops before taking off an SSH key, exit 1, unless given `--remove-keys`: [keys](../guides/troubleshooting.md#apply-would-take-ssh-keys-off).
 - The first apply stops before any change, exit 1, when `plan --impact` marks an item. `--adopt` accepts them: [a machine already in use](../guides/machine-in-use.md).
 - A box last applied with a newer release is refused without `--allow-downgrade`: [updates](../guides/upgrades.md).
 - Only `apply` installs `/usr/local/bin/keelbox` on the box, keeping the binary it replaces for `rollback`.
@@ -1107,6 +1109,7 @@ Every flag except those only `up` takes, which are in [its help](#up).
 | `--binary PATH` | remote commands | The Linux keelbox to upload. Default: this executable if it fits the box, `keelbox-linux-<arch>` beside it, the cache, then a verified download of this version ([releases](release.md#the-binary-uploaded-to-the-box)). |
 | `--verbose` | `up`, `plan`, `apply`, `update`, `doctor`, `add`, `create`, `resize`, `park`, `resume`, `rollback` | One line for every step and every command run on the box. |
 | `--allow-downgrade` | `apply`, `update`, `self-update` | Move the box, or this binary, to an older release. |
+| `--remove-keys` | `apply` | Take off SSH keys the config dropped. |
 | `--adopt` | `apply`, `update`, `up`, `create` | Accept what `plan --impact` marks on a machine in use. It also lets keelbox remove `docker.io`, `docker-compose`, `docker-compose-v2`, `podman-docker`, `containerd` and `runc`, which stops their containers. |
 | `--impact` | `plan` | What apply would change on a machine in use. |
 | `--json` | `plan --impact`, `status`, `ls`, `sessions` | JSON output. |

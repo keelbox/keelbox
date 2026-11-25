@@ -158,7 +158,7 @@ host:
 | `users.lock_cloud_user` | bool | `true` | Lock [the image's default account](../guides/adopting-a-box.md#the-images-default-account), such as `ubuntu`, once the admin is proven. `keelbox up` on this machine writes `false` when run from that account. |
 | `users.admin.name` | string | `admin` | A Linux user name: lowercase, starting with a letter or `_`, at most 31 characters. Not `root`, `daemon`, `bin`, `sys`, `nobody`, `syslog`, `docker` or the agent's name. |
 | `users.admin.ssh_authorized_keys` | list | none | OpenSSH public key lines: `ssh-ed25519`, `ssh-rsa`, `ecdsa-sha2-nistp*`, `sk-ssh-ed25519@openssh.com` or `sk-ecdsa-sha2-nistp256@openssh.com`. |
-| `users.admin.ssh_authorized_key_files` | list | none | Paths to `.pub` files, one or more keys each. The admin needs at least one key from either list, because apply turns off SSH passwords and root login. |
+| `users.admin.ssh_authorized_key_files` | list | none | Paths to `.pub` files, one or more keys each, read on the computer that runs keelbox, so the same path can be another key on another computer. `keelbox up` writes the key itself under `ssh_authorized_keys` instead. The admin needs at least one key from either list, because apply turns off SSH passwords and root login. |
 | `users.admin.sudo` | bool | `true` | The admin always has passwordless sudo. `false` is an error; leave the key out. |
 | `users.agent.name` | string | `agent` | As `users.admin.name`. |
 | `users.agent.ssh_authorized_keys` | list | none | As for the admin. `login`, `attach`, `sessions` and `ssh` log in as the agent with one of these. |

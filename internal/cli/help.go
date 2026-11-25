@@ -344,7 +344,8 @@ var commands = []cmdDoc{
 		},
 		flags: append(append([]flagDoc{}, remote...), fVerbose,
 			flagDoc{"--adopt", "accept what plan --impact marks on a machine in use, such as replacing Ubuntu's docker.io"},
-			flagDoc{"--allow-downgrade", "move the box to an older release"}),
+			flagDoc{"--allow-downgrade", "move the box to an older release"},
+			flagDoc{"--remove-keys", "take off SSH keys this config no longer lists"}),
 	},
 	{
 		name: "doctor", args: "[box]", group: "Maintain",

@@ -15,7 +15,7 @@ Press `Ctrl-b`, let go, then press `d`. The session keeps running on the box, as
 
 `exit` or `Ctrl-d` ends the shell, and the session with it if that was its last window.
 
-To come back, run `keelbox attach acme` from any computer that has the box's config.
+To come back, run `keelbox attach acme` from any computer that has the box's config: [from a second computer](#from-a-second-computer).
 
 | Keys | What they do |
 |---|---|
@@ -57,3 +57,13 @@ Every two minutes the box restarts the agent's tmux server if it has stopped. `k
 ## Your own tmux settings
 
 Put your settings in `~/.tmux.conf` after its `source-file` line, which loads keelbox's. Add hooks with `set-hook -ga`: a plain `set-hook -g` on `session-created` or `client-attached` replaces keelbox's hook and the welcome with it.
+
+## From a second computer
+
+A second computer needs the box's config, its own SSH key on the box, and a way to reach the box.
+
+1. On the first computer, add the second computer's public key, the line in its `~/.ssh/id_ed25519.pub`, under `ssh_authorized_keys` for both accounts in `~/.config/keelbox/boxes/acme.yaml`, then run `keelbox apply acme`.
+2. Copy that config to the same path on the second computer. Leave `ssh_authorized_key_files` out of it, or list both keys as lines: a file path is read on each computer, so it names another key there.
+3. Join the second computer to your tailnet if public SSH has closed. The first connection shows the box's host key; compare it with `ssh-keygen -lf ~/.config/keelbox/known_hosts` on the first computer.
+
+If an apply from either computer would take off a key the last apply put there, it stops and prints the lines that keep it: [apply would take SSH keys off](troubleshooting.md#apply-would-take-ssh-keys-off).

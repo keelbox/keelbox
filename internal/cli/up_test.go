@@ -448,6 +448,17 @@ func TestUpSSHStopsAtSignInAndResumes(t *testing.T) {
 	if cfg.Target.SSH.Host != "10.0.0.5" || cfg.Tailscale() || !cfg.HasAgent("codex") || cfg.HasAgent("claude-code") || st.Stage != stageApplied {
 		t.Errorf("config %+v state %+v", cfg.Target, st)
 	}
+	// The key itself is in the config, not its path, which holds another
+	// key on another computer (ADR 0097).
+	pub, err := os.ReadFile(key + ".pub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range []config.Account{cfg.Users.Admin, cfg.Users.Agent.Account} {
+		if len(a.SSHAuthorizedKeyFiles) != 0 || len(a.SSHAuthorizedKeys) != 1 || a.SSHAuthorizedKeys[0] != strings.TrimSpace(string(pub)) {
+			t.Errorf("keys in the config: %q, files %q", a.SSHAuthorizedKeys, a.SSHAuthorizedKeyFiles)
+		}
+	}
 	if code, out, _ := run("ls"); code != 0 || !strings.Contains(out, "needs sign-in: keelbox up lab") {
 		t.Errorf("ls: %s", out)
 	}

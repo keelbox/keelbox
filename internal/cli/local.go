@@ -108,6 +108,9 @@ func runLocal(ctx context.Context, cmd string, cfg *config.Config, o options, st
 			fail(stderr, err)
 			return 1
 		}
+		if !keysGate(env, o.removeKeys, stderr) {
+			return 1
+		}
 		if os.Getenv(envDetach) == "1" {
 			return startRun(ctx, env, o, stdout, stderr)
 		}
