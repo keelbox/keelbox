@@ -120,6 +120,19 @@ func TestCollect(t *testing.T) {
 	}
 }
 
+// Before the first SSH connection after a boot, sshd -T refuses to run
+// without /run/sshd. The inventory still reads sshd's config, so the first
+// apply still stops for a password login it would cut off.
+func TestCollectSSHDBeforeFirstConnection(t *testing.T) {
+	x := system.NewFake()
+	x.On("sshd -T", system.Result{ExitCode: 255, Stderr: "Missing privilege separation directory: /run/sshd\n"})
+	x.OK("unshare --mount", "passwordauthentication yes\npermitrootlogin yes\n")
+	inv := Collect(context.Background(), x)
+	if !inv.SSHD.PasswordAuth || inv.SSHD.PermitRootLogin != "yes" {
+		t.Errorf("sshd %+v", inv.SSHD)
+	}
+}
+
 func TestCollectNothingThere(t *testing.T) {
 	x := system.NewFake()
 	inv := Collect(context.Background(), x)

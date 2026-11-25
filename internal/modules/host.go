@@ -572,7 +572,7 @@ func (Host) Verify(ctx context.Context, e *engine.Env) []engine.Finding {
 	}
 	// Effective sshd settings, not just our file: catches an earlier drop-in
 	// or Match block overriding them.
-	eff, err := system.Output(ctx, e.X, system.C("sshd", "-T"))
+	eff, err := system.SSHDConfig(ctx, e.X)
 	if err != nil {
 		add("sshd-effective", false, "sshd -T failed: "+err.Error(), engine.LevelFail)
 	} else {
@@ -590,7 +590,7 @@ func (Host) Verify(ctx context.Context, e *engine.Env) []engine.Finding {
 	out = append(out, verifyLinkLocalAccounts(e)...)
 	out = append(out, verifyResolver(e)...)
 	out = append(out, verifyAgentSchedulers(ctx, e)...)
-	if eff, err := system.Output(ctx, e.X, system.C("sshd", "-T", "-C", "user="+e.Cfg.Users.Agent.Name+",host=localhost,addr=127.0.0.1")); err == nil {
+	if eff, err := system.SSHDConfig(ctx, e.X, "-C", "user="+e.Cfg.Users.Agent.Name+",host=localhost,addr=127.0.0.1"); err == nil {
 		add("ssh-agent-forwarding", strings.Contains(eff, "allowagentforwarding no"), "no agent forwarding for "+e.Cfg.Users.Agent.Name, engine.LevelFail)
 	}
 	listening := system.Succeeds(ctx, e.X, system.C("systemctl", "is-active", "--quiet", "ssh.socket")) ||

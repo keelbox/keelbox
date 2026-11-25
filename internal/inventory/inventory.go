@@ -237,7 +237,8 @@ func Collect(ctx context.Context, x system.Executor) *Inventory {
 	passwd := out("getent", "passwd")
 	inv.Accounts = ParseAccounts(passwd, string(shadow), out("getent", "group"))
 	inv.LinkLocal = ParseLinkLocalPeers(strings.Split(out("ss", "-Htunpe"), "\n"), passwd)
-	inv.SSHD = ParseSSHD(out("sshd", "-T"))
+	sshd, _ := system.SSHDConfig(ctx, x)
+	inv.SSHD = ParseSSHD(sshd)
 	// Whether a password login is all an account has: its keys, read as the
 	// account itself, since a home is the account's to change (ADR 0015).
 	for i, a := range inv.Accounts {
