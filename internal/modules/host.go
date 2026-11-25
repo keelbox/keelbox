@@ -585,6 +585,7 @@ func (Host) Verify(ctx context.Context, e *engine.Env) []engine.Finding {
 		add("ssh-root-login", kv["permitrootlogin"] == "no", "permitrootlogin "+kv["permitrootlogin"], engine.LevelFail)
 	}
 	out = append(out, verifyAgentNet(ctx, e), verifyBootstrapSudoers(e))
+	out = append(out, verifyContainer(ctx, e)...)
 	out = append(out, verifyLinkLocalAccounts(e)...)
 	out = append(out, verifyResolver(e)...)
 	out = append(out, verifyAgentSchedulers(ctx, e)...)

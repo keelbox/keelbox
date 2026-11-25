@@ -15,7 +15,7 @@ To set up the Ubuntu machine you are on:
 curl -fsSL https://get.keelbox.dev | sh -s -- up
 ```
 
-Choose option 2, "This machine". Your own account keeps its password and sudo. `admin` and `agent` get the keys in your `~/.ssh/authorized_keys`, or a public key file keelbox asks for. SSH takes keys only, so keep your terminal open until `admin` has logged in with your key. SSH from the internet stays open until a `keelbox apply` from another computer reaches the box over your tailnet.
+Choose option 2, "This machine". In an LXC container, keelbox first checks nesting and the TUN device, which only the container's host can change: [an LXC container](troubleshooting.md#an-lxc-container). Your own account keeps its password and sudo. `admin` and `agent` get the keys in your `~/.ssh/authorized_keys`, or a public key file keelbox asks for. SSH takes keys only, so keep your terminal open until `admin` has logged in with your key. SSH from the internet stays open until a `keelbox apply` from another computer reaches the box over your tailnet.
 
 ## What keelbox up asks
 

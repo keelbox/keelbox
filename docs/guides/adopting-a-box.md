@@ -11,6 +11,8 @@ Two answers to the first question set up a server that keelbox does not create:
 
 The server must run Ubuntu 24.04 or 26.04 on amd64 or arm64, with internet access. Agents and access, and Sign in, work as for [your first box](../getting-started.md).
 
+A virtual machine works as it is. An LXC container (Proxmox, LXD or Incus) needs nesting on, and the TUN device for Tailscale; apply checks both before it changes anything and prints the commands for the container's host ([an LXC container](troubleshooting.md#an-lxc-container)).
+
 ## A server you reach over SSH
 
 At step 2, give the address you `ssh` to now and the account you log in as: `root`, or one with sudo such as `ubuntu`. The host key fingerprint is optional (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the server shows it). Without it, keelbox shows the keys at the first connection and asks `Trust and pin these host keys?`, with No preselected. It refuses the server later if the key changes.
