@@ -180,6 +180,23 @@ func ResizeOffers(types []ServerType, s *Server, location string) []Offer {
 	return out
 }
 
+// MonthlyIn is what Create would order for a type in a location: whether
+// it is orderable there (AvailableIn, Create's own check, deprecated or
+// not), and its gross monthly price, with priced false where Hetzner's
+// list gives none that reads.
+func (t ServerType) MonthlyIn(location string) (monthly float64, orderable, priced bool) {
+	if !t.AvailableIn(location) {
+		return 0, false, false
+	}
+	for _, p := range t.Prices {
+		if p.Location == location {
+			v, err := strconv.ParseFloat(p.PriceMonthly.Gross, 64)
+			return v, true, err == nil && v > 0
+		}
+	}
+	return 0, true, false
+}
+
 func offerIn(t ServerType, location string) Offer {
 	o := Offer{Type: t}
 	for _, p := range t.Prices {
@@ -200,6 +217,9 @@ func Resize(ctx context.Context, cl *Client, box string, s *Server, serverType s
 		return err
 	}
 	act, err := cl.ChangeType(ctx, s.ID, serverType, false)
+	if ae, ok := refusal(err); ok {
+		return &RefusedError{API: ae, Action: "resize", Box: box, Location: s.LocationName(), ServerType: serverType, Server: s.ID}
+	}
 	if err != nil {
 		return err
 	}
@@ -367,12 +387,15 @@ func Restore(ctx context.Context, cl *Client, c *config.Config, img *Image, logf
 		}
 	}
 	sort.Strings(fits)
+	fitsSnapshot := func(t ServerType) bool {
+		return (img.Architecture == "" || archFor(t) == img.Architecture) && float64(t.Disk) >= img.DiskSize
+	}
 	another := fmt.Sprintf("set target.hetzner.server_type to one of: %s, then run keelbox resume %s again", strings.Join(fits, ", "), c.Box)
 	switch {
 	case st == nil:
 		return nil, fmt.Errorf("target.hetzner.server_type %q does not exist; %s", h.ServerType, another)
 	case !st.AvailableIn(h.Location):
-		return nil, fmt.Errorf("server type %s cannot be ordered in %s now; the snapshot is kept. Try again later, or %s", st.Name, h.Location, another)
+		return nil, (&RefusedError{Action: "resume", Box: c.Box, Location: h.Location, ServerType: st.Name, Types: types}).alternatives(fitsSnapshot)
 	case float64(st.Disk) < img.DiskSize:
 		return nil, fmt.Errorf("server type %s has a %d GB disk and the parked snapshot needs %g GB; %s", st.Name, st.Disk, img.DiskSize, another)
 	case img.Architecture != "" && archFor(*st) != img.Architecture:
@@ -402,6 +425,11 @@ func Restore(ctx context.Context, cl *Client, c *config.Config, img *Image, logf
 		SSHKeys: keyIDs, Labels: Labels(c), UserData: provider.ResumeUserData(c.Box),
 		Firewalls: []ServerFirewall{{Firewall: fw.ID}},
 	})
+	if ae, ok := refusal(err); ok {
+		// The firewall stays: it is the box's, kept with its rules while
+		// the box is parked.
+		return nil, (&RefusedError{API: ae, Action: "resume", Box: c.Box, Location: h.Location, ServerType: st.Name, Types: types}).alternatives(fitsSnapshot)
+	}
 	if err != nil {
 		return nil, err
 	}

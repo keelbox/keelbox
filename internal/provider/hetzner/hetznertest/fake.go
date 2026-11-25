@@ -45,9 +45,18 @@ type API struct {
 	// Created are the bodies of the POST /servers calls, in order.
 	Created []map[string]any
 	// Fail makes a call answer a server error: shutdown, poweron,
-	// change_type, create_image, delete_server, delete_image or
-	// create_server.
+	// change_type, create_image, delete_server, delete_image,
+	// create_server, list_firewalls, delete_firewall or
+	// list_server_types.
 	Fail map[string]bool
+	// OnCall, when set, sees each request as "METHOD /path" before the
+	// fake answers it, and may change the fake's fields (it runs with the
+	// fake locked).
+	OnCall func(call string)
+	// Refuse makes create_server or change_type answer with an error of
+	// Hetzner's own, as it does when it will not take an order: by the
+	// call's name, or "create_server fsn1" for one location only.
+	Refuse map[string]Error
 	// SnapshotFails makes the action of a create_image call end in an
 	// error, leaving the image in status creating, as a failed snapshot
 	// is on Hetzner.
@@ -65,6 +74,25 @@ type API struct {
 	nextID  int
 	failed  map[string]bool // ids of actions that ended in an error
 	actions int
+}
+
+// Error is an error answer of the API.
+type Error struct {
+	Status        int
+	Code, Message string
+}
+
+// refused answers a call the fake was told to refuse, and reports whether
+// it did.
+func (a *API) refused(call, location string, fail func(int, string, string)) bool {
+	e, ok := a.Refuse[call+" "+location]
+	if !ok {
+		e, ok = a.Refuse[call]
+	}
+	if ok {
+		fail(e.Status, e.Code, e.Message)
+	}
+	return ok
 }
 
 // Server is a keelbox-made server for box as the API lists it: running,
@@ -240,6 +268,9 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.Requests = append(a.Requests, r.Method+" "+r.URL.RequestURI())
+	if a.OnCall != nil {
+		a.OnCall(r.Method + " " + r.URL.Path)
+	}
 	fail := func(status int, code, msg string) {
 		w.WriteHeader(status)
 		_, _ = fmt.Fprintf(w, `{"error":{"code":%q,"message":%q}}`, code, msg) //nolint:gosec // G705: a test server writing JSON
@@ -267,6 +298,8 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch p := r.URL.Path; {
+	case p == "/server_types" && a.Fail["list_server_types"]:
+		fail(500, "server_error", "the fake was told to fail list_server_types")
 	case p == "/server_types":
 		send(map[string]any{"server_types": ServerTypes(), "meta": page})
 	case p == "/locations":
@@ -354,7 +387,7 @@ func (a *API) project(w http.ResponseWriter, r *http.Request, body map[string]an
 		}
 		send(map[string]any{"action": map[string]any{"id": 1, "status": "success"}})
 	case p == "/servers" && r.Method == "POST":
-		if broken("create_server") {
+		if broken("create_server") || a.refused("create_server", fmt.Sprint(body["location"]), fail) {
 			return true
 		}
 		a.createServer(body, fail, send)
@@ -406,6 +439,10 @@ func (a *API) project(w http.ResponseWriter, r *http.Request, body map[string]an
 			s["status"] = "running"
 		case "change_type":
 			t := serverType(fmt.Sprint(body["server_type"]))
+			loc, _ := s["location"].(map[string]any)
+			if a.refused("change_type", fmt.Sprint(loc["name"]), fail) {
+				return true
+			}
 			switch {
 			case s["status"] != "off":
 				fail(422, "server_not_stopped", "server must be stopped")
@@ -472,6 +509,9 @@ func (a *API) project(w http.ResponseWriter, r *http.Request, body map[string]an
 		a.Images = append(a.Images[:i], a.Images[i+1:]...)
 		w.WriteHeader(204)
 	case p == "/firewalls" && r.Method == "GET":
+		if broken("list_firewalls") {
+			return true
+		}
 		out := []map[string]any{}
 		for _, f := range a.Firewalls {
 			if (q.Get("name") == "" || f["name"] == q.Get("name")) && selected(q.Get("label_selector"), f) {
@@ -490,6 +530,7 @@ func (a *API) project(w http.ResponseWriter, r *http.Request, body map[string]an
 	case strings.HasPrefix(p, "/firewalls/") && r.Method == "DELETE":
 		i, f := find(a.Firewalls, strings.TrimPrefix(p, "/firewalls/"))
 		switch {
+		case broken("delete_firewall"):
 		case f == nil:
 			fail(404, "not_found", "firewall not found")
 		case len(applied(f)) > 0:

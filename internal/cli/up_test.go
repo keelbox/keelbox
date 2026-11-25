@@ -1011,15 +1011,15 @@ func TestUpUnfinishedNotOffered(t *testing.T) {
 
 func TestLockBox(t *testing.T) {
 	isolate(t)
-	unlock, err := lockBox("lab")
+	unlock, err := lockBox("lab", "keelbox up lab")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := lockBox("lab"); err == nil || !strings.Contains(err.Error(), "another keelbox up is working on lab") {
+	if _, err := lockBox("lab", "keelbox up lab"); err == nil || !strings.Contains(err.Error(), "another keelbox command is working on lab; nothing changed. Wait for it to finish, then: keelbox up lab") {
 		t.Errorf("second lock: %v", err)
 	}
 	unlock()
-	if u, err := lockBox("lab"); err != nil {
+	if u, err := lockBox("lab", "keelbox up lab"); err != nil {
 		t.Error(err)
 	} else {
 		u()

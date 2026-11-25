@@ -40,6 +40,27 @@ const exitNeedsYou = 3
 // upHooks report progress from inside create to up's state.
 type upHooks struct {
 	onServer func(ip string)
+	// onRefused takes a cloud's refusal to create the server; up says
+	// what it means and how to go on.
+	onRefused func(r *cloudRefusal)
+	// onNotOrdered is told that the create failed before the cloud was
+	// asked for a server, or was refused: nothing was created.
+	onNotOrdered func()
+}
+
+func (h *upHooks) notOrdered() {
+	if h != nil && h.onNotOrdered != nil {
+		h.onNotOrdered()
+	}
+}
+
+// refused hands r to up, and reports whether up takes it.
+func (h *upHooks) refused(r *cloudRefusal) bool {
+	if h == nil || h.onRefused == nil {
+		return false
+	}
+	h.onRefused(r)
+	return true
 }
 
 func (h *upHooks) server(ip string) {
@@ -94,15 +115,23 @@ type wizard struct {
 	out, errOut io.Writer
 	start       time.Time
 	bannered    bool // the banner is on the screen
-	fresh       bool // configured in this run
-	progressed  bool // a stage was completed in this run
-	changing    bool // past the questions: a stage that changes things has started
-	box         string
-	st          ui.Style
-	draft       *upDraft        // the answers so far, on a terminal (updraft.go)
-	drafted     map[string]bool // flags set from the draft, not the command line
-	via         string          // where the box runs, once known: for the step indicator
-	stepAt      string          // the step shown last
+	// locked is the box this run holds the lock of (lockBox), from the
+	// first check that a move or a create depends on to the end of the
+	// run; unlock releases it.
+	locked     string
+	unlock     func()
+	fresh      bool // configured in this run
+	progressed bool // a stage was completed in this run
+	changing   bool // past the questions: a stage that changes things has started
+	box        string
+	st         ui.Style
+	draft      *upDraft        // the answers so far, on a terminal (updraft.go)
+	drafted    map[string]bool // flags set from the draft, not the command line
+	via        string          // where the box runs, once known: for the step indicator
+	stepAt     string          // the step shown last
+	refused    *cloudRefusal   // the cloud's refusal of the server create asked for
+	moving     string          // while a box moves to another cloud: the one it was on
+	next       string          // the command that continues, when not keelbox up BOX
 }
 
 // banner opens keelbox up on a terminal, once, when it has its first
@@ -209,6 +238,54 @@ func (w *wizard) needFlag(what, flag, example string) error {
 	return fmt.Errorf("%s: no terminal to ask on; pass %s, for example: %s", what, flag, example)
 }
 
+// lock takes box's lock for the rest of the run, unless the run holds it.
+func (w *wizard) lock(box string) error {
+	if w.locked == box {
+		return nil
+	}
+	// Once the other command is done, this run as it was asked.
+	again := "keelbox up " + box
+	if w.box == box {
+		again = w.upCommand(nil)
+	}
+	unlock, err := lockBox(box, again)
+	if err != nil {
+		return err
+	}
+	if w.unlock != nil {
+		w.unlock()
+	}
+	w.locked, w.unlock = box, unlock
+	if lockedHook != nil {
+		lockedHook(box)
+	}
+	return nil
+}
+
+// lockedHook, when set, runs once up holds a box's lock: tests stand in
+// for a command that finished just before.
+var lockedHook func(box string)
+
+// rerun is the command that runs up for box again once the user has done
+// what an error asks: during a move to another cloud, the move with the
+// flags it was given.
+func (w *wizard) rerun(box string) string {
+	if w.next != "" {
+		return w.next
+	}
+	return "keelbox up " + box
+}
+
+// example is plain, an example command a missing answer prints, or during
+// a move the move with change added to its flags: plain alone would not
+// move the box.
+func (w *wizard) example(plain string, change map[string]string) string {
+	if w.moving == "" {
+		return plain
+	}
+	return w.upCommand(change)
+}
+
 // hostKeyPlaceholder stands for a fingerprint in an example command: the
 // user reads the real one off the server or the provider's console.
 const hostKeyPlaceholder = "SHA256:..."
@@ -282,6 +359,11 @@ func (w *wizard) upCommand(change map[string]string) string {
 func cmdUp(ctx context.Context, o options, pos []string, p *prompt.Prompter, run upRunner, stdout, stderr io.Writer) int {
 	w := &wizard{p: p.OnInterrupt(ctx.Done()), o: o, run: run, out: stdout, errOut: stderr, start: time.Now(), st: o.style}
 	defer asInvoker()()
+	defer func() {
+		if w.unlock != nil {
+			w.unlock()
+		}
+	}()
 	stopSaid.Store(true) // up says what a Ctrl-C at one of its questions means
 	setInterruptNote("") // while asking, Ctrl-C ends the question; nothing has changed
 	code, err := w.up(ctx, pos)
@@ -290,6 +372,8 @@ func cmdUp(ctx context.Context, o options, pos []string, p *prompt.Prompter, run
 	}
 	again := "keelbox up"
 	switch {
+	case w.next != "":
+		again = w.next
 	case w.box != "" && isKnown(w.box):
 		again += " " + w.box
 	case w.draft != nil && w.draft.Box != "":
@@ -342,7 +426,7 @@ func cmdUp(ctx context.Context, o options, pos []string, p *prompt.Prompter, run
 		say(ui.Stopped, fmt.Sprintf("stopped; nothing was changed.%s Continue: %s", kept, again))
 		return exitNeedsYou
 	case errors.Is(err, prompt.ErrInterrupted) || (err != nil || code != 0) && ctx.Err() != nil && !w.changing:
-		if kept != "" {
+		if kept != "" || w.box != "" && isKnown(w.box) {
 			say(ui.Stopped, fmt.Sprintf("stopped; nothing was changed.%s Continue: %s", kept, again))
 		} else {
 			say(ui.Stopped, fmt.Sprintf("stopped; nothing was changed. Start again: %s", again))
@@ -434,7 +518,20 @@ func (w *wizard) up(ctx context.Context, pos []string) (int, error) {
 					return 1, perr
 				}
 			}
-			return w.resume(ctx, cfg, st)
+			if cfg != nil && notCreated(cfg) {
+				// No server yet: where it is created may still change.
+				if w.o.set["provider"] && w.o.provider != cfg.Target.Provider {
+					return w.moveCloud(ctx, name, cfg)
+				}
+				ok, err := w.placeAgain(ctx, cfg)
+				if err != nil {
+					return 2, err
+				}
+				if !ok {
+					return 0, nil // declined the new price; placeAgain said so
+				}
+			}
+			return w.carryOn(ctx, cfg, st)
 		}
 	}
 	cfg, st, proceed, err := w.configure(ctx, name)
@@ -448,7 +545,7 @@ func (w *wizard) up(ctx context.Context, pos []string) (int, error) {
 		return 0, nil // the user said no
 	}
 	w.fresh = true
-	return w.resume(ctx, cfg, st)
+	return w.carryOn(ctx, cfg, st)
 }
 
 // offerDraft: keelbox up with no name, when answers from a run that did not
@@ -586,16 +683,21 @@ func (w *wizard) configure(ctx context.Context, name string) (*config.Config, up
 	var a answers
 	w.banner()
 	if w.p.Interactive() {
-		if w.st.Live {
+		switch {
+		case w.moving != "":
+			// Mid-run, after a refusal: up said what it does.
+		case w.st.Live:
 			w.hint("Set up a box for AI coding agents. Ctrl-C stops at any question; keelbox up continues later.")
-		} else {
+		default:
 			fmt.Fprintln(w.out, w.st.Plain("keelbox up: set up a box for AI coding agents. Ctrl-C stops; keelbox up continues later.", 2))
 		}
 		if w.draft == nil {
 			w.draft = &upDraft{Answers: map[string]string{}}
 		}
 	}
-	w.step("Where the box runs")
+	if w.moving == "" {
+		w.step("Where the box runs")
+	}
 	if err := w.askWhere(ctx, &a); err != nil {
 		return nil, upState{}, false, err
 	}
@@ -706,6 +808,9 @@ func (w *wizard) configure(ctx context.Context, name string) (*config.Config, up
 		}
 	}
 	st := upState{Via: a.via, Stage: stageConfigured, Adopt: a.adopt || w.o.adopt, OfferRemoteControl: a.offerRC}
+	if isCloud(a.via) {
+		st.Answers = w.keptAnswers()
+	}
 	if a.via == viaSSH {
 		st.Bootstrap, st.Address = w.o.sshUser, a.starter.SSHHost
 		st.SudoPassword = a.facts != nil && !a.facts.Sudo
@@ -735,6 +840,16 @@ func (w *wizard) configure(ctx context.Context, name string) (*config.Config, up
 // command that continues. On a terminal it is the block of a stop.
 func (w *wizard) declinedGoAhead(name string, gated, tokenStored bool) {
 	const stays = "The Hetzner token stays stored for next time; remove it: keelbox forget-token"
+	if w.moving != "" {
+		// A box moving to another cloud stays where it was configured.
+		text := fmt.Sprintf("nothing changed; %s stays on %s, with no server. Move it later: %s", name, w.moving, w.next)
+		if !w.st.Live {
+			fmt.Fprintln(w.out, w.st.Plain("keelbox up: "+text, 2))
+			return
+		}
+		fmt.Fprint(w.out, "\n"+w.st.Trouble(ui.Trouble{Severity: ui.Stopped, Text: text, Names: []string{name}}))
+		return
+	}
 	if !w.st.Live {
 		if gated {
 			fmt.Fprintln(w.out, w.st.Plain("keelbox up: nothing changed. Your answers are kept: keep what the items marked * would stop first (the hints say how), then continue: keelbox up "+name, 2))
@@ -951,7 +1066,7 @@ func (w *wizard) askHetzner(ctx context.Context, a *answers) error {
 		case err == nil:
 			token, a.tokenStored = t, true
 		case !w.p.Interactive():
-			return w.needFlag("no Hetzner API token is stored", "--token-file with a mode 600 file holding one", "keelbox up "+s.Box+" --provider hetzner --token-file ~/hetzner.token --yes")
+			return w.needFlag("no Hetzner API token is stored", "--token-file with a mode 600 file holding one", w.example("keelbox up "+s.Box+" --provider hetzner --token-file ~/hetzner.token --yes", map[string]string{"token-file": "~/hetzner.token"})) //nolint:gosec // G101: a path in an example, no credential
 		default:
 			t, _, err := askHetznerToken(ctx, w.p, w.out, store, "hetzner")
 			if err != nil {
@@ -1697,7 +1812,13 @@ func (w *wizard) confirmPlan(a *answers) (bool, error) {
 		return true, nil
 	}
 	if !w.p.Interactive() {
-		return false, w.needFlag("confirmation", "--yes", "keelbox up "+s.Box+" --provider "+a.via+" --yes")
+		// This command with the flags it was given, and --yes: what a
+		// draft does not keep must be given again.
+		example := "keelbox up " + s.Box + " --provider " + a.via + " --yes"
+		if w.box == s.Box {
+			example = w.upCommand(map[string]string{"provider": a.via, "yes": "true"})
+		}
+		return false, w.needFlag("confirmation", "--yes", example)
 	}
 	return w.p.Confirm(question, true)
 }
@@ -1823,11 +1944,9 @@ func (w *wizard) showCloudConfig(box string) error {
 // resume runs the stages a box has not completed.
 func (w *wizard) resume(ctx context.Context, cfg *config.Config, st upState) (int, error) {
 	box := st.boxName(cfg)
-	unlock, err := lockBox(box)
-	if err != nil {
+	if err := w.lock(box); err != nil {
 		return 1, err
 	}
-	defer unlock()
 	w.banner()
 	// From here on things change: Ctrl-C lets the current step finish.
 	w.changing = true
@@ -1901,7 +2020,25 @@ func (w *wizard) resume(ctx context.Context, cfg *config.Config, st upState) (in
 				return 1, err
 			}
 		}
-		if code := w.firstApply(ctx, cfg, &st); code != 0 {
+		code := w.firstApply(ctx, cfg, &st)
+		for code != 0 && w.refused != nil {
+			// The cloud created nothing: the box is as it was before the
+			// create, and where it is created may change.
+			r := w.refused
+			w.refused, st.Applying = nil, false
+			if err := saveUpState(box, st); err != nil {
+				return 1, err
+			}
+			if err := w.afterRefusal(ctx, cfg, r); err != nil {
+				return 1, err
+			}
+			st.Applying = true
+			if err := saveUpState(box, st); err != nil {
+				return 1, err
+			}
+			code = w.firstApply(ctx, cfg, &st)
+		}
+		if code != 0 {
 			if code == exitDetached {
 				return code, nil // left running on the box; the follower said how to pick it up
 			}
@@ -2046,7 +2183,12 @@ func (w *wizard) firstApply(ctx context.Context, cfg *config.Config, st *upState
 	o.adopt = o.adopt || st.Adopt
 	o.hooks = &upHooks{
 		onServer: func(ip string) {
-			st.Address, st.Bootstrap, st.Stage = ip, bootstrapUser(st.Via), stageServer
+			st.Address, st.Bootstrap, st.Stage, st.Answers = ip, bootstrapUser(st.Via), stageServer, nil
+			_ = saveUpState(box, *st)
+		},
+		onRefused: func(r *cloudRefusal) { w.refused = r },
+		onNotOrdered: func() {
+			st.Applying = false
 			_ = saveUpState(box, *st)
 		},
 	}

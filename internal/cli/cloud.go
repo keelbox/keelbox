@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"time"
 
 	"github.com/keelbox/keelbox/internal/config"
@@ -507,7 +508,45 @@ func cloudCreate(ctx context.Context, cl cloud, cfg *config.Config, o options, l
 		fail(stderr, err)
 		return 1
 	}
+	// A box keelbox up configured, created here instead: from the order
+	// on, it is no longer one whose cloud may change (notCreated).
+	ordering := false
+	if o.hooks == nil && boxRef(cfg, o.configFile) == cfg.Box {
+		// keelbox create by hand: no keelbox up on the box meanwhile, which
+		// could move it to another cloud while this one orders.
+		unlock, err := lockBox(cfg.Box, "keelbox create "+cfg.Box)
+		if err != nil {
+			fail(stderr, err)
+			return 1
+		}
+		defer unlock()
+		if msg := targetChanged(cfg); msg != "" {
+			failf(stderr, "%s\n", msg)
+			return 1
+		}
+		if ordering, err = markOrdering(cfg, true); err != nil {
+			failf(stderr, "nothing was ordered: keelbox could not note in %s that %s's server is being created (%v). Make it writable, then: keelbox create %s\n",
+				tildePath(upStatePath(cfg.Box)), cfg.Box, err, cfg.Box)
+			return 1
+		}
+	}
 	srv, err := cl.create(ctx, provider.HostKeyPair{Private: priv, Public: pub}, logf)
+	var refused *cloudRefusal
+	if errors.As(err, &refused) || provider.NotOrdered(err) {
+		// Certain that nothing was created: where it is may still change.
+		if ordering {
+			// Unwritten, the box stays marked as ordering: it does not
+			// move, which is the safe side.
+			_, _ = markOrdering(cfg, false)
+		}
+		o.hooks.notOrdered()
+	}
+	if errors.As(err, &refused) {
+		if !o.hooks.refused(refused) {
+			fail(stderr, fmt.Errorf("%w. %s", err, createRefusedFix(cfg, o, refused)))
+		}
+		return 1
+	}
 	if err != nil {
 		fail(stderr, err)
 		if srv != nil {
@@ -517,6 +556,12 @@ func cloudCreate(ctx context.Context, cl cloud, cfg *config.Config, o options, l
 	}
 	// The box has a server again.
 	forgetDestroyedMark(cfg.Box)
+	if ordering {
+		// keelbox up carries on with this server, not another create.
+		if err := recordServer(cfg, srv.ip); err != nil {
+			notef(stderr, "could not note %s's server in %s (%v); keelbox up %s would stop at it as a server that already exists. Once this create is done, converge the box with: keelbox apply %s", cfg.Box, tildePath(upStatePath(cfg.Box)), err, cfg.Box, cfg.Box)
+		}
+	}
 	ip := addr{srv.ip, cfg.Target.SSH.Port}
 	o.hooks.server(ip.host)
 	o.publicIP = srv.ip
@@ -573,6 +618,46 @@ func cloudCreate(ctx context.Context, cl cloud, cfg *config.Config, o options, l
 		printNextSteps(stdout, cfg, boxRef(cfg, o.configFile))
 	}
 	return 0
+}
+
+// createRefusedFix is how keelbox create goes on after a refusal: for a
+// box keelbox up configured, the up commands that change where it is
+// created; else the config keys, and another box for another cloud.
+func createRefusedFix(cfg *config.Config, o options, r *cloudRefusal) string {
+	ref := boxRef(cfg, o.configFile)
+	if ref == cfg.Box && notCreated(cfg) {
+		return r.upFix(cfg.Box, cfg.Target.Provider, "")
+	}
+	path := o.configFile
+	if path == "" {
+		path = boxConfigPath(cfg.Box)
+	}
+	return r.configFix(path, "keelbox create "+ref, "A box on another cloud: "+otherCloudCommand(cfg.Box+"-2", otherClouds(cfg.Target.Provider)[0].via))
+}
+
+// targetChanged reads the box's config again, once keelbox create holds
+// the box, and says what changed in its target since create read it, with
+// the command that goes on from there; "" when nothing did. A keelbox up
+// that moved the box, or changed where it is created, carries that on.
+func targetChanged(cfg *config.Config) string {
+	box, path := cfg.Box, boxConfigPath(cfg.Box)
+	next := "keelbox create " + box
+	if _, ok := loadUpState(cfg); ok {
+		next = "keelbox up " + box
+	}
+	now, err := config.Load(path)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("nothing was ordered: reading %s again failed (%v). Fix it, then: %s", tildePath(path), err, next)
+	case reflect.DeepEqual(now.Target, cfg.Target):
+		return ""
+	case now.Target.Provider != cfg.Target.Provider:
+		return fmt.Sprintf("%s moved to %s while this command was starting; nothing was ordered. Carry on with it there: %s", box, now.Target.Provider, next)
+	case now.Target.Provider == config.ProviderHetzner && (now.Target.Hetzner.Location != cfg.Target.Hetzner.Location || now.Target.Hetzner.ServerType != cfg.Target.Hetzner.ServerType):
+		return fmt.Sprintf("%s changed to %s in %s while this command was starting; nothing was ordered. Carry on with it: %s",
+			box, now.Target.Hetzner.ServerType, now.Target.Hetzner.Location, next)
+	}
+	return fmt.Sprintf("the target in %s changed while this command was starting; nothing was ordered. Carry on with it: %s", tildePath(path), next)
 }
 
 // createdNote is the line that ends a create, with what its time covers:

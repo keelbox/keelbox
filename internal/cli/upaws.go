@@ -31,7 +31,7 @@ func (w *wizard) askAWS(ctx context.Context, a *answers) error {
 	s := &a.starter
 	s.Provider, s.Blueprint = config.ProviderAWS, config.DefaultAWSBlueprint
 	w.step("AWS sign-in")
-	again := "keelbox up " + s.Box
+	again := w.rerun(s.Box)
 	if !awsInstalled() {
 		// Only the user can install it: up stops here, before any change.
 		return &needsYouError{aws.ErrNoCLI.Error() + ". Then: " + again}
@@ -114,7 +114,7 @@ func (w *wizard) askAWSRegion(ctx context.Context, a *answers, cl *aws.Client, r
 	}
 	if !w.p.Interactive() {
 		if names[def] != configured {
-			return w.needFlag("the AWS region", "--location", "keelbox up "+s.Box+" --provider aws --location eu-central-1 --yes")
+			return w.needFlag("the AWS region", "--location", w.example("keelbox up "+s.Box+" --provider aws --location eu-central-1 --yes", map[string]string{"location": "eu-central-1"}))
 		}
 		s.Region = configured
 		return nil

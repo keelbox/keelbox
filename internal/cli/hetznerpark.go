@@ -54,7 +54,7 @@ func (h *hetznerCloud) start(ctx context.Context, srv *cloudServer) (*cloudServe
 
 func (h *hetznerCloud) resize(ctx context.Context, srv *cloudServer, size string, _ func(string, ...any)) (*cloudServer, error) {
 	if err := hetzner.Resize(ctx, h.cl, h.cfg.Box, srv.raw.(*hetzner.Server), size); err != nil {
-		return nil, err
+		return nil, hetznerRefusal(err)
 	}
 	return srv, nil
 }
@@ -124,7 +124,7 @@ func (h *hetznerCloud) parked(ctx context.Context) (*cloudParked, error) {
 
 func (h *hetznerCloud) restore(ctx context.Context, p *cloudParked, logf func(string, ...any)) (*cloudServer, error) {
 	srv, err := hetzner.Restore(ctx, h.cl, h.cfg, p.raw.(*hetzner.Image), logf)
-	return hetznerServer(srv), err
+	return hetznerServer(srv), hetznerRefusal(err)
 }
 
 func (h *hetznerCloud) discard(ctx context.Context, p *cloudParked, logf func(string, ...any)) error {

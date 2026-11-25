@@ -305,7 +305,7 @@ func Find(ctx context.Context, cl *Client, box string) (*Droplet, error) {
 			return nil, fmt.Errorf("the Droplet %s (id %d) was not created by keelbox (missing the tags %s and %s); not touching it. Use another box name, or manage it as an existing server: keelbox up %s --provider ssh --host ITS-IP",
 				box, named[0].ID, TagManaged, BoxTag(box), box)
 		}
-		return nil, fmt.Errorf("no Droplet named %s in the DigitalOcean account; %s", box, provider.NoServerFix(box))
+		return nil, &provider.NoServerError{Msg: fmt.Sprintf("no Droplet named %s in the DigitalOcean account; %s", box, provider.NoServerFix(box))}
 	}
 	ids := make([]string, len(own))
 	for i, d := range own {

@@ -33,7 +33,7 @@ func (w *wizard) askGCP(ctx context.Context, a *answers) error {
 	s := &a.starter
 	s.Provider = config.ProviderGCP
 	w.step("Google Cloud sign-in")
-	again := "keelbox up " + s.Box
+	again := w.rerun(s.Box)
 	if !gcpInstalled() {
 		// Only the user can install it: up stops here, before any change.
 		return &needsYouError{gcp.ErrNoCLI.Error() + ". Then: " + again}
@@ -61,7 +61,7 @@ func (w *wizard) askGCP(ctx context.Context, a *answers) error {
 			return err
 		}
 	case project == "":
-		return w.needFlag("the Google Cloud project (gcloud has none set)", "--gcp-project", "keelbox up "+s.Box+" --provider gcp --gcp-project my-project --location europe-west3-a --yes")
+		return w.needFlag("the Google Cloud project (gcloud has none set)", "--gcp-project", w.example("keelbox up "+s.Box+" --provider gcp --gcp-project my-project --location europe-west3-a --yes", map[string]string{"gcp-project": "my-project"}))
 	}
 	// The project is written to the config: the box stays in it whatever
 	// gcloud is pointed at later.
@@ -140,7 +140,7 @@ func (w *wizard) askGCPZone(a *answers, zones []gcp.Zone, configured string) err
 	// is gcloud's own, or it must be named.
 	if !w.p.Interactive() {
 		if configured == "" {
-			return w.needFlag("the Google Cloud zone", "--location", "keelbox up "+s.Box+" --provider gcp --location europe-west3-a --yes")
+			return w.needFlag("the Google Cloud zone", "--location", w.example("keelbox up "+s.Box+" --provider gcp --location europe-west3-a --yes", map[string]string{"location": "europe-west3-a"}))
 		}
 		s.Zone = configured
 		return nil

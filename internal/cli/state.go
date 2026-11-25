@@ -45,9 +45,14 @@ type upState struct {
 	// Control after the Claude Code sign-in rather than with the other
 	// choices (ADR 0061); RemoteControlNext once the owner said yes and the
 	// last apply is to start it.
-	OfferRemoteControl bool      `json:"offer_remote_control,omitempty"`
-	RemoteControlNext  bool      `json:"remote_control_next,omitempty"`
-	Updated            time.Time `json:"updated"`
+	OfferRemoteControl bool `json:"offer_remote_control,omitempty"`
+	RemoteControlNext  bool `json:"remote_control_next,omitempty"`
+	// Answers are the answers the box was configured with, as the flags
+	// that give them (no secrets: a token is never one), kept until its
+	// cloud server exists: a box the cloud would not create a server for
+	// moves to another cloud with them (docs/adr/0095-hetzner-refusals.md).
+	Answers map[string]string `json:"answers,omitempty"`
+	Updated time.Time         `json:"updated"`
 }
 
 // Ways a box is reached.

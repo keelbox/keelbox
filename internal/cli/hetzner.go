@@ -46,7 +46,7 @@ func hetznerServer(s *hetzner.Server) *cloudServer {
 
 func (h *hetznerCloud) create(ctx context.Context, hk provider.HostKeyPair, logf func(string, ...any)) (*cloudServer, error) {
 	srv, err := hetzner.Create(ctx, h.cl, h.cfg, hk, logf)
-	return hetznerServer(srv), err
+	return hetznerServer(srv), hetznerRefusal(err)
 }
 
 func (h *hetznerCloud) find(ctx context.Context) (*cloudServer, error) {
