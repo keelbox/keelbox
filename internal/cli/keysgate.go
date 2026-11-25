@@ -3,8 +3,10 @@ package cli
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"strings"
 
 	"github.com/keelbox/keelbox/internal/config"
@@ -14,10 +16,11 @@ import (
 )
 
 // KeysRecord is root's record of the SSH keys applies have put on the
-// box, per account. An apply writes the union of the record and its own
-// keys before any step runs, and its own keys alone once it has passed: an
-// apply that stops partway, after authorized_keys changed, leaves every
-// key it may have put there in the record.
+// box, per account. An apply writes it, under the lock, before any step
+// runs, once the check has passed: the record's keys are then all in this
+// apply's config, or the user asked for the others to come off. An apply
+// that stops partway, after authorized_keys changed, leaves every key it
+// may have put there in the record.
 const KeysRecord = "/etc/keelbox/ssh-keys.yaml"
 
 // keysOnBox are the keys of the admin and the agent, in the record.
@@ -39,18 +42,33 @@ func configKeys(c *config.Config) (keysOnBox, error) {
 	return keysOnBox{admin, agent}, nil
 }
 
+// errRecord is a record keelbox cannot read.
+var errRecord = errors.New("unreadable")
+
 // lastKeys reads the record, or on a box set up before it existed, the
 // config the last apply left: only its key lists, so a key keelbox no
 // longer knows elsewhere in it cannot make the check pass by default.
-func lastKeys(e *engine.Env) (keysOnBox, bool) {
-	var k keysOnBox
-	if data, err := e.X.ReadFile(KeysRecord); err == nil {
-		return k, yaml.Unmarshal(data, &k) == nil
+// found is false on a box never applied. A record that does not parse is
+// errRecord: the check cannot pass on it.
+func lastKeys(x interface {
+	ReadFile(string) ([]byte, error)
+}) (k keysOnBox, found bool, err error) {
+	if data, rerr := x.ReadFile(KeysRecord); rerr == nil {
+		if yaml.Unmarshal(data, &k) != nil {
+			return k, true, errRecord
+		}
+		return k, true, nil
 	}
-	data, err := e.X.ReadFile(modules.ConfigPath)
-	if err != nil {
-		return k, false
+	data, rerr := x.ReadFile(modules.ConfigPath)
+	if rerr != nil {
+		return k, false, nil
 	}
+	k, ok := copyKeys(data)
+	return k, ok, nil
+}
+
+// copyKeys are the key lists of the config an apply left in /etc/keelbox.
+func copyKeys(data []byte) (keysOnBox, bool) {
 	var last struct {
 		Users struct {
 			Admin struct {
@@ -62,24 +80,16 @@ func lastKeys(e *engine.Env) (keysOnBox, bool) {
 		} `yaml:"users"`
 	}
 	if yaml.Unmarshal(data, &last) != nil {
-		return k, false
+		return keysOnBox{}, false
 	}
 	return keysOnBox{last.Users.Admin.Keys, last.Users.Agent.Keys}, true
 }
 
-// recordKeys writes the record: with union, the record's keys and this
-// apply's, before it changes anything; without, this apply's alone, once
-// it has passed.
-func recordKeys(e *engine.Env, union bool) error {
+// recordKeys writes the record: this apply's keys.
+func recordKeys(e *engine.Env) error {
 	now, err := configKeys(e.Cfg)
 	if err != nil {
 		return err
-	}
-	if union {
-		if last, ok := lastKeys(e); ok {
-			now.Admin = mergeKeys(last.Admin, now.Admin)
-			now.Agent = mergeKeys(last.Agent, now.Agent)
-		}
 	}
 	data, err := yaml.Marshal(now)
 	if err != nil {
@@ -89,18 +99,6 @@ func recordKeys(e *engine.Env, union bool) error {
 		return err
 	}
 	return e.X.WriteFile(KeysRecord, append([]byte("# Managed by keelbox: the SSH keys applies put on this box.\n"), data...), 0o600, "root", "root")
-}
-
-func mergeKeys(a, b []string) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, k := range append(append([]string(nil), a...), b...) {
-		if !seen[keyBlob(k)] {
-			seen[keyBlob(k)] = true
-			out = append(out, k)
-		}
-	}
-	return out
 }
 
 // removedKey is an SSH key the box's last apply put in an account's
@@ -121,7 +119,11 @@ func keysGate(e *engine.Env, removeKeys bool, stderr io.Writer) bool {
 	if removeKeys {
 		return true
 	}
-	gone := keysTakenOff(e)
+	gone, err := keysTakenOff(e)
+	if err != nil {
+		failf(stderr, "%s is %s, so keelbox cannot tell which SSH keys applies put on %s. Nothing has changed. If this config lists every key the box should have: keelbox apply %s --remove-keys\n", KeysRecord, err, e.Cfg.Box, e.Cfg.Box)
+		return false
+	}
 	if len(gone) == 0 {
 		return true
 	}
@@ -147,17 +149,22 @@ func keysGate(e *engine.Env, removeKeys bool, stderr io.Writer) bool {
 }
 
 // keysTakenOff compares the keys applies put on the box with this
-// apply's, for the admin and the agent. A box never applied, or a record
-// keelbox cannot read, takes nothing off.
-func keysTakenOff(e *engine.Env) []removedKey {
-	last, ok := lastKeys(e)
-	if !ok {
-		return nil
+// apply's, for the admin and the agent. A box never applied takes nothing
+// off; a record keelbox cannot read is an error.
+func keysTakenOff(e *engine.Env) ([]removedKey, error) {
+	last, found, err := lastKeys(e.X)
+	if err != nil || !found {
+		return nil, err
 	}
 	now, err := configKeys(e.Cfg)
 	if err != nil {
-		return nil
+		return nil, nil // the config's own check says why
 	}
+	return takenOff(last, now), nil
+}
+
+// takenOff are the keys in last that now lacks, per account.
+func takenOff(last, now keysOnBox) []removedKey {
 	var gone []removedKey
 	for _, a := range []struct {
 		name      string
@@ -228,25 +235,48 @@ func keepKeysYAML(gone []removedKey) string {
 }
 
 // applyKeepingKeys runs apply under the lock with root's record of the
-// keys around it. The check runs again here, under the lock: another
-// apply may have recorded a key since the first look. Every key this
-// apply may put on the box is recorded before any step runs, so one that
-// stops partway cannot let the next take a key off unasked; with
-// --remove-keys only this config's keys are, since the user asked for the
-// others to come off. Once apply has passed, the record is its keys alone.
+// keys written first. The check runs again here, under the lock: another
+// apply may have recorded a key since the first look. Once it passes, the
+// record's keys are all in this config, or the user asked for the others
+// to come off, so the record is this config's keys: an apply that stops
+// partway leaves every key it may have put on the box in it.
 func applyKeepingKeys(e *engine.Env, removeKeys bool, stderr io.Writer, apply func() int) int {
 	if !keysGate(e, removeKeys, stderr) {
 		return 1
 	}
-	if err := recordKeys(e, !removeKeys); err != nil {
+	if err := recordKeys(e); err != nil {
 		failf(stderr, "recording the SSH keys before the apply: %v. Nothing has changed. Check that root can write %s (sudo ls -ld /etc/keelbox), then: keelbox apply %s\n", err, KeysRecord, e.Cfg.Box)
 		return 1
 	}
-	code := apply()
-	if code == 0 {
-		if err := recordKeys(e, false); err != nil {
-			fmt.Fprintf(stderr, "keelbox: warning: the apply passed, but recording its SSH keys failed (%v); the next apply may stop for a key it took off: keelbox apply %s --remove-keys passes it\n", err, e.Cfg.Box)
+	return apply()
+}
+
+// rollbackKeys stops a rollback that would take off keys a later apply
+// put on the box: rollback applies the config the apply before left in
+// /etc/keelbox, which may lack them, as when an apply that added a
+// computer's key failed after it. --remove-keys lets it. Otherwise the
+// record is removed, since the older keelbox may not keep it.
+func rollbackKeys(x interface {
+	ReadFile(string) ([]byte, error)
+	Remove(string) error
+}, box string, removeKeys bool, stderr io.Writer) bool {
+	last, found, err := lastKeys(x)
+	if found && err == nil && !removeKeys {
+		data, rerr := x.ReadFile(modules.ConfigPath)
+		if copied, ok := copyKeys(data); rerr == nil && ok {
+			if gone := takenOff(last, copied); len(gone) > 0 {
+				failf(stderr, "a rollback to the config applied before would take SSH keys off %s that a later apply put there. Nothing has changed.\n", box)
+				for _, k := range gone {
+					fmt.Fprintf(stderr, "  %s: %s\n", k.account, keyLabel(k.key))
+				}
+				fmt.Fprintf(stderr, "\nTo keep them, apply the config that lists them instead of rolling back: keelbox apply %s. To roll back and take them off: keelbox rollback %s --remove-keys\n", box, box)
+				return false
+			}
 		}
 	}
-	return code
+	if err := x.Remove(KeysRecord); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		failf(stderr, "rollback: %v", err)
+		return false
+	}
+	return true
 }

@@ -118,7 +118,7 @@ func TestKeysGateTakesNothingOff(t *testing.T) {
 		{name: "same keys", last: []string{laptopA}, now: cfg(laptopA)},
 		{name: "another comment", last: []string{laptopA}, now: cfg(strings.TrimSuffix(laptopA, "laptop-a") + "renamed")},
 		{name: "a key added", last: []string{laptopA}, now: cfg(laptopA, laptopB)},
-		{name: "unreadable last config", raw: "version: [", now: cfg(laptopB)},
+		{name: "unreadable last config", raw: "version: [", now: cfg(laptopB)}, // the pre-record fallback only
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			x := system.NewFake()
@@ -156,7 +156,7 @@ func TestKeysRecordAcrossApplies(t *testing.T) {
 	if !keysGate(e, false, &stderr) {
 		t.Fatalf("adding a key stopped:\n%s", stderr.String())
 	}
-	if err := recordKeys(e, true); err != nil {
+	if err := recordKeys(e); err != nil {
 		t.Fatal(err)
 	}
 	// A applies its config with A alone: B would come off.
@@ -169,10 +169,7 @@ func TestKeysRecordAcrossApplies(t *testing.T) {
 	if !keysGate(e, true, &stderr) {
 		t.Fatal("--remove-keys stopped")
 	}
-	if err := recordKeys(e, true); err != nil {
-		t.Fatal(err)
-	}
-	if err := recordKeys(e, false); err != nil {
+	if err := recordKeys(e); err != nil {
 		t.Fatal(err)
 	}
 	if !keysGate(e, false, &stderr) {
@@ -241,5 +238,53 @@ func TestApplyKeepingKeys(t *testing.T) {
 	}
 	if fi := x.Files[KeysRecord]; fi == nil || fi.Mode != 0o600 || fi.Owner != "root" {
 		t.Errorf("record file %+v", fi)
+	}
+}
+
+// A record that does not parse stops apply, with the flag that passes.
+func TestKeysGateUnreadableRecord(t *testing.T) {
+	x := system.NewFake()
+	x.AddFile(KeysRecord, "admin: [", 0o600)
+	c := &config.Config{Box: "acme"}
+	c.Users.Admin.SSHAuthorizedKeys = []string{laptopA}
+	var stderr bytes.Buffer
+	if keysGate(&engine.Env{X: x, Cfg: c}, false, &stderr) || !strings.HasSuffix(stderr.String(), "keelbox apply acme --remove-keys\n") {
+		t.Errorf("an unreadable record passed:\n%s", stderr.String())
+	}
+	if !keysGate(&engine.Env{X: x, Cfg: c}, true, &stderr) {
+		t.Error("--remove-keys stopped")
+	}
+}
+
+// Rollback applies the config the apply before left. When a later apply
+// that added a key failed before it copied its config, that config lacks
+// the key: rollback stops, unless --remove-keys. Otherwise it removes the
+// record, which the older keelbox may not keep.
+func TestRollbackKeys(t *testing.T) {
+	x := system.NewFake()
+	lastApplied(t, x, laptopA)
+	x.AddFile(KeysRecord, "admin: [\""+laptopA+"\", \""+laptopB+"\"]\nagent: [\""+laptopA+"\"]\n", 0o600)
+	var stderr bytes.Buffer
+	if rollbackKeys(x, "acme", false, &stderr) {
+		t.Fatal("rollback took B's key off unasked")
+	}
+	if got := stderr.String(); !strings.Contains(got, "users.admin: ssh-ed25519 SHA256:") || !strings.Contains(got, "laptop-b") || !strings.HasSuffix(got, "keelbox rollback acme --remove-keys\n") {
+		t.Errorf("message:\n%s", got)
+	}
+	if _, err := x.ReadFile(KeysRecord); err != nil {
+		t.Error("the record went with a stopped rollback")
+	}
+	if !rollbackKeys(x, "acme", true, &stderr) {
+		t.Fatal("--remove-keys stopped")
+	}
+	if _, err := x.ReadFile(KeysRecord); err == nil {
+		t.Error("the record stayed for the older keelbox")
+	}
+	// Nothing a later apply added: the record goes, and rollback runs.
+	x = system.NewFake()
+	lastApplied(t, x, laptopA)
+	x.AddFile(KeysRecord, "admin: [\""+laptopA+"\"]\nagent: [\""+laptopA+"\"]\n", 0o600)
+	if !rollbackKeys(x, "acme", false, &stderr) {
+		t.Errorf("stopped:\n%s", stderr.String())
 	}
 }
