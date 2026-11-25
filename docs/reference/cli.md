@@ -184,7 +184,7 @@ The steps one by one: [your first box](../getting-started.md).
 - `keelbox up acme` continues at the first step not done. On a box that is set up it prints the closing screen again.
 - Flags for a box that already has a config are ignored with a warning: edit the config and run `keelbox apply acme`.
 - Until a cloud box's server is created, `--provider` moves the box to another cloud with your other answers kept, and on Hetzner `--location` and `--size` change where it is created. At a new price, `up` asks again, or without a terminal needs `--yes`. When the cloud refuses to create the server, `up` asks how to go on, or without a terminal prints these commands. After a create that fails for another reason, the server may exist, and these flags change nothing.
-- A second `up` on a box while one runs stops at once.
+- A second `up` on a box while one runs stops at once, and so does `keelbox create` on it: each names its own command to run once the other is done.
 - For Hetzner, `up` uploads your SSH public key to the project as `keelbox-<this computer's hostname>`, or reuses a project key with the same fingerprint.
 - Under `sudo keelbox up`, the config goes to the home of the user who ran sudo.
 
@@ -411,7 +411,7 @@ Flags:
 ```
 <!-- keelbox create --help: end -->
 
-`create` fails when a server named after the box exists. If the apply fails after the server is created, the server stays and is billed: run `keelbox apply acme` or `keelbox destroy acme`. What each cloud gets: [the four clouds](clouds.md).
+`create` fails when a server named after the box exists. While it runs, `keelbox up` on the box stops at once, and `create` stops at once while `up` runs; it orders nothing if the box's target changed since it started. If the apply fails after the server is created, the server stays and is billed: run `keelbox apply acme` or `keelbox destroy acme`. What each cloud gets: [the four clouds](clouds.md).
 
 ### resize
 

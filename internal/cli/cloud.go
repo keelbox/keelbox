@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"time"
 
 	"github.com/keelbox/keelbox/internal/config"
@@ -519,8 +520,8 @@ func cloudCreate(ctx context.Context, cl cloud, cfg *config.Config, o options, l
 			return 1
 		}
 		defer unlock()
-		if now, err := config.Load(boxConfigPath(cfg.Box)); err == nil && now.Target.Provider != cfg.Target.Provider {
-			failf(stderr, "%s moved to %s while this command started; nothing was ordered. Run it again: keelbox create %s\n", cfg.Box, now.Target.Provider, cfg.Box)
+		if msg := targetChanged(cfg); msg != "" {
+			failf(stderr, "%s\n", msg)
 			return 1
 		}
 		if ordering, err = markOrdering(cfg, true); err != nil {
@@ -632,6 +633,31 @@ func createRefusedFix(cfg *config.Config, o options, r *cloudRefusal) string {
 		path = boxConfigPath(cfg.Box)
 	}
 	return r.configFix(path, "keelbox create "+ref, "A box on another cloud: "+otherCloudCommand(cfg.Box+"-2", otherClouds(cfg.Target.Provider)[0].via))
+}
+
+// targetChanged reads the box's config again, once keelbox create holds
+// the box, and says what changed in its target since create read it, with
+// the command that goes on from there; "" when nothing did. A keelbox up
+// that moved the box, or changed where it is created, carries that on.
+func targetChanged(cfg *config.Config) string {
+	box, path := cfg.Box, boxConfigPath(cfg.Box)
+	next := "keelbox create " + box
+	if _, ok := loadUpState(cfg); ok {
+		next = "keelbox up " + box
+	}
+	now, err := config.Load(path)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("nothing was ordered: reading %s again failed (%v). Fix it, then: %s", tildePath(path), err, next)
+	case reflect.DeepEqual(now.Target, cfg.Target):
+		return ""
+	case now.Target.Provider != cfg.Target.Provider:
+		return fmt.Sprintf("%s moved to %s while this command was starting; nothing was ordered. Carry on with it there: %s", box, now.Target.Provider, next)
+	case now.Target.Provider == config.ProviderHetzner && (now.Target.Hetzner.Location != cfg.Target.Hetzner.Location || now.Target.Hetzner.ServerType != cfg.Target.Hetzner.ServerType):
+		return fmt.Sprintf("%s changed to %s in %s while this command was starting; nothing was ordered. Carry on with it: %s",
+			box, now.Target.Hetzner.ServerType, now.Target.Hetzner.Location, next)
+	}
+	return fmt.Sprintf("the target in %s changed while this command was starting; nothing was ordered. Carry on with it: %s", tildePath(path), next)
 }
 
 // createdNote is the line that ends a create, with what its time covers:

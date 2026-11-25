@@ -243,7 +243,12 @@ func (w *wizard) lock(box string) error {
 	if w.locked == box {
 		return nil
 	}
-	unlock, err := lockBox(box, "keelbox up "+box)
+	// Once the other command is done, this run as it was asked.
+	again := "keelbox up " + box
+	if w.box == box {
+		again = w.upCommand(nil)
+	}
+	unlock, err := lockBox(box, again)
 	if err != nil {
 		return err
 	}
@@ -251,8 +256,15 @@ func (w *wizard) lock(box string) error {
 		w.unlock()
 	}
 	w.locked, w.unlock = box, unlock
+	if lockedHook != nil {
+		lockedHook(box)
+	}
 	return nil
 }
+
+// lockedHook, when set, runs once up holds a box's lock: tests stand in
+// for a command that finished just before.
+var lockedHook func(box string)
 
 // rerun is the command that runs up for box again once the user has done
 // what an error asks: during a move to another cloud, the move with the

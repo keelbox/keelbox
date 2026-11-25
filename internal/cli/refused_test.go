@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -121,7 +122,7 @@ func TestUpHetznerRefusedWithoutATerminal(t *testing.T) {
 		t.Errorf("forget would say a server may exist: %+v", plan)
 	}
 	// A location Hetzner does not have is refused before anything changes.
-	if code, out := upWith(t, r, nil, "up", "acme", "--location", "mars1"); code != 2 || !strings.Contains(out, `--location "mars1" is not a Hetzner location; use one of: fsn1, ash, for example: keelbox up acme --location ash`) {
+	if code, out := upWith(t, r, nil, "up", "acme", "--location", "mars1"); code != 2 || !strings.Contains(out, `--location "mars1" is not a Hetzner location; use one of: fsn1, ash, for example (cx23 in ash at EUR 5.49/month): keelbox up acme --location ash --yes`) {
 		t.Errorf("exit %d\n%s", code, out)
 	}
 
@@ -564,7 +565,7 @@ func TestUpRefusedBoxWithAServerAfterAll(t *testing.T) {
 func TestUpRefusedMistypedSize(t *testing.T) {
 	r, _ := refusedBox(t, forbidden)
 	code, out := upWith(t, r, nil, "up", "acme", "--size", "cpx222")
-	if code != 2 || !strings.Contains(flat(out), `--size "cpx222" is not a Hetzner server type; use one that can be ordered in fsn1 now: cx23, cax11, cpx02, cpx22, ccx13, for example: keelbox up acme --size cpx22`) {
+	if code != 2 || !strings.Contains(flat(out), `--size "cpx222" is not a Hetzner server type; use one that can be ordered in fsn1 now: cx23, cax11, cpx02, cpx22, ccx13, for example (cpx22 in fsn1 at EUR 7.49/month): keelbox up acme --size cpx22 --yes`) {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
 	if cfg := mustLoad(t, "acme"); cfg.Target.Hetzner.ServerType != "cx23" || !notCreated(cfg) || len(r.calls) != 0 {
@@ -750,13 +751,13 @@ func TestNewPriceWithoutAPrice(t *testing.T) {
 func TestUpRefusedBothPlaceFlagsWrong(t *testing.T) {
 	r, _ := refusedBox(t, forbidden)
 	code, out := upWith(t, r, nil, "up", "acme", "--location", "mars1", "--size", "cpx222")
-	want := `--location "mars1" is not a Hetzner location; use one of: fsn1, ash; --size "cpx222" is not a Hetzner server type; use one that can be ordered in ash now: cx23, cpx02, for example: keelbox up acme --location ash --size cpx02`
+	want := `--location "mars1" is not a Hetzner location; use one of: fsn1, ash; --size "cpx222" is not a Hetzner server type; use one that can be ordered in ash now: cx23, cpx02, for example (cpx02 in ash at EUR 6.49/month): keelbox up acme --location ash --size cpx02 --yes`
 	if code != 2 || !strings.HasSuffix(strings.TrimSpace(flat(out)), want) {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
-	// The example, as printed, gets to the go-ahead for its price.
-	code, out = upWith(t, r, nil, "up", "acme", "--location", "ash", "--size", "cpx02")
-	if code != 2 || !strings.HasSuffix(strings.TrimSpace(flat(out)), "keelbox up acme --location ash --size cpx02 --yes") {
+	// The example, as printed, creates the box there.
+	code, out = upWith(t, r, nil, "up", "acme", "--location", "ash", "--size", "cpx02", "--yes")
+	if cfg := mustLoad(t, "acme"); code != 0 || cfg.Target.Hetzner.Location != "ash" || cfg.Target.Hetzner.ServerType != "cpx02" {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
 }
@@ -768,7 +769,7 @@ func TestCheckPlaceWithNothingElseThere(t *testing.T) {
 	h := config.Hetzner{Location: "fsn1", ServerType: "cx23"}
 	types := []hetzner.ServerType{hetznerType("cx23", map[string]string{"fsn1": "3.79"}), hetznerType("cpx02", map[string]string{"ash": "6.49"})}
 	_, _, err := w.checkPlace(types, nil, h)
-	if err == nil || !strings.HasSuffix(err.Error(), "use one that can be ordered in fsn1 now: cx23, for example: keelbox up acme --location ash --size cpx02") {
+	if err == nil || !strings.HasSuffix(err.Error(), "use one that can be ordered in fsn1 now: cx23, for example (cpx02 in ash at EUR 6.49/month): keelbox up acme --location ash --size cpx02 --yes") {
 		t.Errorf("got %v", err)
 	}
 	_, _, err = w.checkPlace(types[:1], nil, h)
@@ -793,7 +794,8 @@ func TestRefusedBoxLocked(t *testing.T) {
 		{"up", "acme", "--location", "ash", "--yes"},
 	} {
 		code, out := upWith(t, r, nil, args...)
-		if code != 2 || !strings.HasSuffix(strings.TrimSpace(flat(out)), held+"keelbox up acme") || len(r.calls) != 0 {
+		// Each names its own command, to run once the other is done.
+		if code != 2 || !strings.HasSuffix(strings.TrimSpace(flat(out)), held+"keelbox "+strings.Join(args, " ")) || len(r.calls) != 0 {
 			t.Errorf("%v: exit %d\n%s", args, code, out)
 		}
 	}
@@ -823,7 +825,7 @@ func TestCreateByHandAfterAMove(t *testing.T) {
 	register(t, s)
 	var out strings.Builder
 	code := cloudCreate(context.Background(), &hetznerCloud{cl: newHetznerClient(goodToken), cfg: cfg}, cfg, options{}, t.Logf, &out, &out)
-	if code != 1 || !strings.Contains(flat(out.String()), "acme moved to digitalocean while this command started; nothing was ordered. Run it again: keelbox create acme") {
+	if code != 1 || !strings.Contains(flat(out.String()), "acme moved to digitalocean while this command was starting; nothing was ordered. Carry on with it there: keelbox up acme") {
 		t.Fatalf("exit %d\n%s", code, out.String())
 	}
 	for _, c := range api.Calls() {
@@ -867,5 +869,86 @@ func TestCreateByHandRecordsTheServerItMade(t *testing.T) {
 	code, out2 := upWith(t, r, nil, "up", "acme")
 	if code != 0 || strings.Contains(strings.Join(r.calls, "; "), "create acme") || !strings.Contains(strings.Join(r.calls, "; "), "apply acme") {
 		t.Fatalf("exit %d, calls %v\n%s", code, r.calls, out2)
+	}
+}
+
+// Any change to the target since keelbox create read it stops the order;
+// on a box up does not own, the fix is create again.
+func TestCreateByHandAfterAChangeOfPlace(t *testing.T) {
+	w := newParkWorld(t)
+	w.api.Servers, w.api.Firewalls = nil, nil
+	// Changed on disk, by another command: w.cfg is what create read.
+	if _, err := setConfigKey(mustLoad(t, "acme"), boxConfigPath("acme"), "target.hetzner.location", "ash"); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	code := cloudCreate(context.Background(), w.cl, w.cfg, options{}, t.Logf, &out, &out)
+	if code != 1 || !strings.Contains(flat(out.String()), "acme changed to cx23 in ash while this command was starting; nothing was ordered. Carry on with it: keelbox create acme") {
+		t.Fatalf("exit %d\n%s", code, out.String())
+	}
+	if err := os.WriteFile(boxConfigPath("acme"), []byte("not: [yaml"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if code := cloudCreate(context.Background(), w.cl, w.cfg, options{}, t.Logf, &out, &out); code != 1 || !strings.Contains(flat(out.String()), "nothing was ordered: reading ~/.config/keelbox/boxes/acme.yaml again failed") {
+		t.Fatalf("exit %d\n%s", code, out.String())
+	}
+	for _, c := range w.api.Calls() {
+		if strings.HasPrefix(c, "POST /servers") {
+			t.Errorf("sent %s", c)
+		}
+	}
+}
+
+// A keelbox create that finished just before up took the box: up changes
+// nothing and carries on with the box as it is.
+func TestUpRefusedBoxCreatedJustBefore(t *testing.T) {
+	for _, args := range [][]string{
+		{"up", "acme", "--provider", "digitalocean", "--location", "fra1", "--yes"},
+		{"up", "acme", "--location", "ash", "--yes"},
+	} {
+		t.Run(args[2], func(t *testing.T) {
+			r, _ := refusedBox(t, forbidden)
+			fakeDO(t)
+			lockedHook = func(box string) { _ = recordServer(mustLoad(t, box), "203.0.113.9") }
+			defer func() { lockedHook = nil }()
+			code, out := upWith(t, r, nil, args...)
+			if code != 2 || !strings.HasSuffix(strings.TrimSpace(flat(out)), "another keelbox command changed acme just now; nothing changed. Carry on with it as it is: keelbox up acme") || len(r.calls) != 0 {
+				t.Fatalf("exit %d, calls %v\n%s", code, r.calls, out)
+			}
+			if cfg := mustLoad(t, "acme"); cfg.Target.Provider != config.ProviderHetzner || cfg.Target.Hetzner.Location != "fsn1" {
+				t.Errorf("target %+v", cfg.Target)
+			}
+		})
+	}
+}
+
+// An alternative with no price: its command has no --yes and stops at the
+// go-ahead, and picking it on a terminal asks for one.
+func TestRefusalAlternativeWithoutAPrice(t *testing.T) {
+	r := &cloudRefusal{err: errors.New("refused"), location: "fsn1", size: "cx23", locationKey: "target.hetzner.location", sizeKey: "target.hetzner.server_type",
+		otherSizes: []string{"odd"}, otherLocations: []string{"ash"},
+		price: func(size, loc string) string {
+			if size == "cx23" && loc == "ash" {
+				return "EUR 5.49/month"
+			}
+			return ""
+		},
+		sizesAt: func(string) ([]prompt.Choice, int) {
+			return []prompt.Choice{{Key: "cx23", Label: "cx23"}, {Key: "odd", Label: "odd"}}, 0
+		},
+	}
+	fix := r.upFix("acme", config.ProviderHetzner, "")
+	if !strings.Contains(fix, "keelbox up acme --location ash --yes;") || !strings.Contains(fix, "another size in fsn1 (odd): keelbox up acme --size odd;") {
+		t.Errorf("got %s", fix)
+	}
+	refusedBox(t, forbidden)
+	var out bytes.Buffer
+	w := &wizard{p: prompt.New(strings.NewReader(*script("1", "", "n")), &out, true), out: &out, errOut: &out, box: "acme"}
+	if err := w.afterRefusal(context.Background(), mustLoad(t, "acme"), r); !errors.Is(err, errStopHere) || !strings.Contains(out.String(), "Hetzner's list gives no price for odd in fsn1. Create the server as odd there anyway?") {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if cfg := mustLoad(t, "acme"); cfg.Target.Hetzner.ServerType != "cx23" {
+		t.Errorf("size %s", cfg.Target.Hetzner.ServerType)
 	}
 }

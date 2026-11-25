@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 
 	"github.com/keelbox/keelbox/internal/config"
@@ -87,7 +88,7 @@ func hetznerRefusal(err error) error {
 		otherLocations: re.OtherLocations, otherSizes: re.OtherTypes}
 	r.price = func(size, location string) string {
 		for _, o := range hetzner.Offers(types, location) {
-			if o.Type.Name == size {
+			if o.Type.Name == size && o.Monthly > 0 {
 				return fmt.Sprintf("EUR %.2f/month", o.Monthly)
 			}
 		}
@@ -177,11 +178,21 @@ func (r *cloudRefusal) configFix(path, retry, also string) string {
 		strings.Join(known, " "), strings.Join(keys, " or "), tildePath(path), retry, also, retry)
 }
 
+// yesAt is the --yes of a printed command whose price is shown: price,
+// or "" where there is none, and the command stops at the go-ahead.
+func yesAt(price string) string {
+	if price == "" {
+		return ""
+	}
+	return " --yes"
+}
+
 // upFix is the end of a refusal when keelbox up created the box's config
 // and has no terminal to ask on: a command for each way on, each as it
 // runs. extra is added to each, as up was given it. At a new price, up
 // asks for the go-ahead again (newPrice): the commands for another
-// location or size say their price and carry --yes, which gives it;
+// location or size say their price and carry --yes, which gives it (none
+// without a price);
 // another cloud has no --yes and stops at that cloud's go-ahead.
 func (r *cloudRefusal) upFix(box, provider, extra string) string {
 	up := "keelbox up " + box
@@ -191,10 +202,10 @@ func (r *cloudRefusal) upFix(box, provider, extra string) string {
 	}
 	var ways []string
 	if len(r.otherLocations) > 0 {
-		ways = append(ways, fmt.Sprintf("another location (%s): %s --location %s%s --yes", r.pricedLocations(), up, r.otherLocations[0], extra))
+		ways = append(ways, fmt.Sprintf("another location (%s): %s --location %s%s%s", r.pricedLocations(), up, r.otherLocations[0], extra, yesAt(r.price(r.size, r.otherLocations[0]))))
 	}
 	if len(r.otherSizes) > 0 {
-		ways = append(ways, fmt.Sprintf("another size in %s (%s): %s --size %s%s --yes", r.location, r.pricedSizes(), up, r.otherSizes[0], extra))
+		ways = append(ways, fmt.Sprintf("another size in %s (%s): %s --size %s%s%s", r.location, r.pricedSizes(), up, r.otherSizes[0], extra, yesAt(r.price(r.otherSizes[0], r.location))))
 	}
 	ways = append(ways, move)
 	return "Try " + strings.Join(ways, "; ") + "; or the same again later: " + up + extra
@@ -284,6 +295,9 @@ func (w *wizard) placeAgain(ctx context.Context, cfg *config.Config) (bool, erro
 	// Held to the end of the run: a keelbox create meanwhile would order
 	// where the config no longer says.
 	if err := w.lock(box); err != nil {
+		return false, err
+	}
+	if err := stillNotCreated(cfg); err != nil {
 		return false, err
 	}
 	failed := func(err error) error {
@@ -410,6 +424,20 @@ func (w *wizard) checkPlace(types []hetzner.ServerType, locNames []string, h con
 		// No example to give for a flag: the rest, or the same later.
 		return "", "", fmt.Errorf("%s. Hetzner lists nothing else to order now; try again later: %s", msg, w.upCommand(change))
 	}
+	// The example's own price, and --yes for it, as a refusal's commands
+	// have: it runs as printed in one step.
+	exLoc, exSize := loc, size
+	if v, ok := change["location"]; ok {
+		exLoc = v
+	}
+	if v, ok := change["size"]; ok {
+		exSize = v
+	}
+	t, _ := hetzner.TypeNamed(types, exSize)
+	if m, _, priced := t.MonthlyIn(exLoc); priced {
+		change["yes"] = "true"
+		return "", "", fmt.Errorf("%s, for example (%s in %s at EUR %.2f/month): %s", msg, exSize, exLoc, m, w.upCommand(change))
+	}
 	return "", "", fmt.Errorf("%s, for example: %s", msg, w.upCommand(change))
 }
 
@@ -454,6 +482,21 @@ func (w *wizard) newPrice(types []hetzner.ServerType, wasSize, wasLoc, size, loc
 	}
 	w.logf("nothing changed; %s stays %s in %s, with no server. To create it there later: %s", w.box, wasSize, wasLoc, w.upCommand(map[string]string{"yes": "true"}))
 	return false, nil
+}
+
+// stillNotCreated checks again, once up holds the box, that it has no
+// server and its config is as up read it: a keelbox create that finished
+// just before may have created one. Nothing changes otherwise.
+func stillNotCreated(cfg *config.Config) error {
+	path := boxConfigPath(cfg.Box)
+	now, err := config.Load(path)
+	switch {
+	case err != nil:
+		return fmt.Errorf("nothing changed: reading %s again failed (%v). Fix it, then: keelbox up %s", tildePath(path), err, cfg.Box)
+	case !notCreated(now) || !reflect.DeepEqual(now.Target, cfg.Target):
+		return fmt.Errorf("another keelbox command changed %s just now; nothing changed. Carry on with it as it is: keelbox up %s", cfg.Box, cfg.Box)
+	}
+	return nil
 }
 
 // noServerYet checks, before up moves a box to another cloud or changes
@@ -584,6 +627,9 @@ func (w *wizard) afterRefusal(ctx context.Context, cfg *config.Config, r *cloudR
 			}
 			size = sc[k].Key
 		}
+		if err := w.unpriced(r, size, loc); err != nil {
+			return err
+		}
 		if err := set(r.locationKey, loc); err != nil {
 			return err
 		}
@@ -605,6 +651,9 @@ func (w *wizard) afterRefusal(ctx context.Context, cfg *config.Config, r *cloudR
 		if err != nil {
 			return err
 		}
+		if err := w.unpriced(r, keep[k].Key, r.location); err != nil {
+			return err
+		}
 		return set(r.sizeKey, keep[k].Key)
 	case "cloud":
 		entries := otherClouds(cfg.Target.Provider)
@@ -624,6 +673,19 @@ func (w *wizard) afterRefusal(ctx context.Context, cfg *config.Config, r *cloudR
 		return &movingCloud{entries[j].via}
 	}
 	return errStopHere
+}
+
+// unpriced asks for the go-ahead for size in loc when the cloud's list
+// gives no price for it: the menus showed none. errStopHere is a no.
+func (w *wizard) unpriced(r *cloudRefusal, size, loc string) error {
+	if r.price(size, loc) != "" {
+		return nil
+	}
+	ok, err := w.p.Confirm(fmt.Sprintf("Hetzner's list gives no price for %s in %s. Create the server as %s there anyway?", size, loc, size), false)
+	if err == nil && !ok {
+		err = errStopHere
+	}
+	return err
 }
 
 // moveCloud configures a box whose server was not created on another
@@ -648,6 +710,9 @@ func (w *wizard) moveCloud(ctx context.Context, name string, cfg *config.Config)
 	// Held to the end of the run: a keelbox create meanwhile would order
 	// on the cloud the box is leaving.
 	if err := w.lock(name); err != nil {
+		return 2, err
+	}
+	if err := stillNotCreated(cfg); err != nil {
 		return 2, err
 	}
 	if err := w.noServerYet(ctx, cfg, w.next, "keelbox forget "+name+", then: "+w.next); err != nil {
