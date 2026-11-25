@@ -61,6 +61,14 @@ type sim struct {
 	// localAddrs are the box's own addresses besides loopback and the
 	// tailnet's: what ip route get calls local.
 	localAddrs []string
+	// noGhostty is a release whose ncurses-term lacks ghostty (24.04);
+	// ncursesRev stands for the release's version of its entries, which
+	// an upgrade or an update changes. umask is root's when tic runs.
+	// noBase is a box whose ncurses-base and ncurses-term entries are gone.
+	noGhostty  bool
+	noBase     bool
+	ncursesRev string
+	umask      fs.FileMode
 	// nftLoaded is the agent table as the kernel has it: the rules file as
 	// it was when keelbox-agent-net.service last started.
 	nftLoaded string
@@ -208,6 +216,28 @@ func res(out string) (system.Result, error) { return system.Result{Stdout: out},
 func failed(c system.Cmd) (system.Result, error) {
 	r := system.Result{ExitCode: 1}
 	return r, &system.ExitError{Cmd: c, Result: r}
+}
+
+// terminfoPackaged is an entry a package installs, as infocmp prints its
+// capabilities: ncurses-base's xterm-256color, ncurses-term's ghostty and
+// kitty, kitty-terminfo's xterm-kitty and the ghostty package's
+// xterm-ghostty, all in /usr/share/terminfo.
+func (s *sim) terminfoPackaged(dir, name string) (string, bool) {
+	from := map[string]string{"xterm-256color": "ncurses-base", "kitty": "ncurses-term", "xterm-kitty": "kitty-terminfo", "xterm-ghostty": "ghostty"}[name]
+	switch {
+	case dir != "/usr/share/terminfo":
+		return "", false
+	case s.noBase && (from == "ncurses-base" || from == "ncurses-term" || name == "ghostty"):
+		return "", false
+	case name == "ghostty" && !s.noGhostty:
+		from = "ncurses-term"
+	case from == "":
+		return "", false
+	}
+	if from != "ncurses-base" && s.pkgs[from] == "" {
+		return "", false
+	}
+	return "\tam,\n\tcolors#256,\n\tsrc=" + name + s.ncursesRev + ",\n", true
 }
 
 func (s *sim) userGroups(u string) []string {
@@ -408,6 +438,41 @@ func (s *sim) run(c system.Cmd) (system.Result, error) {
 		if m, err := strconv.ParseUint(arg(0), 8, 32); err == nil && s.has(arg(1)) {
 			s.Files[arg(1)].Mode = fs.FileMode(m)
 		}
+		return res("")
+	case "infocmp": // infocmp -D, or infocmp -A DIR -x -1 NAME
+		if strings.Join(a, " ") == "-D" {
+			return res("/etc/terminfo\n/root/.terminfo\n/usr/share/terminfo\n")
+		}
+		if len(a) != 5 || a[0] != "-A" || a[2] != "-x" || a[3] != "-1" {
+			return failed(c)
+		}
+		dir, name := a[1], a[4]
+		if dir == TerminfoDir {
+			f, ok := s.Files[terminfoFile(name)]
+			if !ok || !strings.Contains(string(f.Data), "|") {
+				return failed(c) // missing, or not an entry infocmp reads
+			}
+			return res("#\tReconstructed via infocmp from file: " + terminfoFile(name) + "\n" + string(s.Files[terminfoFile(name)].Data))
+		}
+		body, ok := s.terminfoPackaged(dir, name)
+		if !ok {
+			return failed(c)
+		}
+		return res(name + "|" + name + ",\n" + body)
+	case "tic": // an entry's source on stdin, with no use=: tic resolves nothing
+		if strings.Join(a, " ") != "-x -o "+TerminfoDir+" -" || strings.Contains(string(c.Stdin), "use=") {
+			return failed(c)
+		}
+		names, body, _ := strings.Cut(string(c.Stdin), "\n")
+		name, _, _ := strings.Cut(names, "|")
+		if name == "" || !strings.HasSuffix(names, ",") {
+			return failed(c)
+		}
+		f := terminfoFile(name)
+		if !s.has(path.Dir(f)) {
+			s.Files[path.Dir(f)] = &system.FakeFile{Dir: true, Mode: 0o777 &^ s.umask, Owner: "root", Group: "root"}
+		}
+		s.Files[f] = &system.FakeFile{Data: []byte(names + "\n" + body), Mode: 0o666 &^ s.umask, Owner: "root", Group: "root"}
 		return res("")
 	case "tmux":
 		switch arg(0) {

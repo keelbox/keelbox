@@ -116,6 +116,7 @@ The downgrade guard reads the newest apply record whose result is `ok` or `parti
 | `/etc/sudoers.d/91-keelbox-agent` | host | Only with `users.agent.permissions: full` (or `users.agent.sudo: true`). Removed otherwise. |
 | `/etc/sudoers.d/90-keelbox-bootstrap` | host | Never written. apply removes it, and doctor fails while it is there. |
 | `/etc/sysctl.d/60-keelbox.conf` | host | inotify limits for file watchers. |
+| `/etc/terminfo/x/xterm-ghostty` | host | Compiled with `tic` as a copy of the release's `ghostty` entry, so a shell reached over `ssh` from Ghostty or cmux edits lines and draws `vim`, `less` and tmux correctly; kitty's `xterm-kitty` comes from the `kitty-terminfo` package. Where the release has no `ghostty` entry (Ubuntu 24.04), it copies `xterm-256color`. apply copies it again when the release's entry changes, makes it readable by every account (0644, its directory 0755), and removes it once a package installs `xterm-ghostty`, such as Ubuntu's `ghostty`. Its description reads `keelbox alias of` the entry copied; an entry of that name keelbox did not compile is left alone. |
 | `/etc/apparmor.d/keelbox-bwrap` | host | Only where `kernel.apparmor_restrict_unprivileged_userns` is 1 and Ubuntu ships no `bwrap-userns-restrict` (Ubuntu 24.04). Ubuntu's own profile for `/usr/bin/bwrap`, taken from its `apparmor-profiles` package, so the agent CLIs' sandboxes can use a user namespace. Loaded with `apparmor_parser`, rolled back if refused, and removed once Ubuntu's file is in `/etc/apparmor.d`. |
 | `/etc/cron.deny`, `/etc/at.deny` | host | A line naming the agent, when cron or at is installed. apply also removes the agent's crontab and at jobs. An `/etc/cron.allow` or `/etc/at.allow` naming the agent is left to you, and that step fails with the fix. |
 | `/etc/apt/apt.conf.d/21keelbox-auto-upgrades` | host | Unattended upgrades on or off. |
@@ -164,7 +165,7 @@ One run at a time, at most an hour each, at CPU and I/O weight 50 and nice 10. `
 
 | Set | Packages |
 |---|---|
-| Base | `ca-certificates curl gnupg jq git openssh-server build-essential pkg-config unzip zip xz-utils zstd tmux ncurses-term htop ripgrep fd-find ncdu bubblewrap socat file python3-pil unattended-upgrades ufw nftables locales acl` |
+| Base | `ca-certificates curl gnupg jq git openssh-server build-essential pkg-config unzip zip xz-utils zstd tmux ncurses-term kitty-terminfo htop ripgrep fd-find ncdu bubblewrap socat file python3-pil unattended-upgrades ufw nftables locales acl` |
 | Yours | `host.packages` |
 | Tailscale | `tailscale` |
 | Docker | `docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras uidmap slirp4netns dbus-user-session` |

@@ -27,7 +27,7 @@ func (Host) Enabled(*config.Config) bool { return true }
 var BasePackages = []string{
 	"ca-certificates", "curl", "gnupg", "jq", "git", "openssh-server",
 	"build-essential", "pkg-config", "unzip", "zip", "xz-utils", "zstd",
-	"tmux", "ncurses-term", "htop", "ripgrep", "fd-find", "ncdu",
+	"tmux", "ncurses-term", "kitty-terminfo", "htop", "ripgrep", "fd-find", "ncdu",
 	"bubblewrap", "socat", "file", "python3-pil", "unattended-upgrades", "ufw", "nftables", "locales", "acl",
 }
 
@@ -81,6 +81,7 @@ func (h Host) Steps(e *engine.Env) []engine.Step {
 			return append(append([]string(nil), BasePackages...), e.Cfg.Host.Packages...)
 		}),
 		bwrapProfileStep(),
+		terminfoStep(),
 		hostnameStep(c.Host.Hostname),
 		timezoneStep(c.Host.Timezone),
 	}
