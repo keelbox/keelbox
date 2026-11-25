@@ -246,8 +246,22 @@ func TestSSHFailureEndsWithTheFix(t *testing.T) {
 		"keelbox on the box failed":   {err: exitStatus(1), user: "admin", cmd: "doctor", keeps: true},
 		"not ssh":                     {err: errors.New("no keelbox binary for arm64"), user: "admin", cmd: "plan", keeps: true},
 		"the command on the box":      {err: errors.New("ssh admin@192.0.2.10: exit status 1: cat: nothing"), user: "admin", keeps: true},
-		"a host key nobody confirmed": {err: &provider.HostKeyError{Host: "192.0.2.10"}, user: "admin", cmd: "plan", keeps: true},
+		"a host key nobody confirmed": {
+			err: &provider.HostKeyError{Host: "192.0.2.10", Offered: []provider.HostKey{{Type: "ssh-ed25519", Blob: "AAAAC3NzaC1lZDI1NTE5AAAAIKeelbox"}}}, user: "admin", cmd: "plan",
+			want: "192.0.2.10 is not a host keelbox has connected to, and no terminal is attached to confirm its host key. It offers " + hostKeyFP + " (ssh-ed25519). " +
+				"Read the server's key in the provider's console, or ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the server. In ~/.config/keelbox/boxes/lab.yaml, under target.ssh, set host_key: SHA256:... to that key. Then run: keelbox plan lab",
+		},
+		"a host key other than the pinned one": {
+			err: &provider.HostKeyError{Host: "192.0.2.10", Want: "SHA256:" + strings.Repeat("A", 43), Offered: []provider.HostKey{{Type: "ssh-ed25519", Blob: "AAAAC3NzaC1lZDI1NTE5AAAAIKeelbox"}}}, user: "admin", cmd: "apply",
+			want: "192.0.2.10 does not offer the host key SHA256:" + strings.Repeat("A", 43) + " that target.ssh.host_key pins; it offers " + hostKeyFP + " (ssh-ed25519). keelbox did not connect; if the server was reinstalled, that is expected. " +
+				"Read the server's key in the provider's console, or ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the server. In ~/.config/keelbox/boxes/lab.yaml, under target.ssh, set host_key: SHA256:... to that key. Then run: keelbox apply lab",
+		},
 	} {
+		if hk := (*provider.HostKeyError)(nil); errors.As(c.err, &hk) {
+			if got := sshFailure(context.Background(), c.err, cfg, sshTarget(cfg, addr{"192.0.2.10", 22}, options{}, io.Discard, io.Discard), c.o, c.cmd); !errors.As(got, &hk) {
+				t.Errorf("%s: the refusal is no longer found in %T", name, got)
+			}
+		}
 		portAnswers(t, c.port)
 		s := sshTarget(cfg, addr{"192.0.2.10", 22}, options{}, io.Discard, io.Discard).As(c.user)
 		got := sshFailure(context.Background(), c.err, cfg, s, c.o, c.cmd)
@@ -489,3 +503,6 @@ func TestCutOffAndTheTerminalRestore(t *testing.T) {
 		t.Errorf("the restore starts %q", terminalRestore[:12])
 	}
 }
+
+// hostKeyFP is the fingerprint of the host key the refusals above offer.
+var hostKeyFP = provider.HostKey{Type: "ssh-ed25519", Blob: "AAAAC3NzaC1lZDI1NTE5AAAAIKeelbox"}.Fingerprint()

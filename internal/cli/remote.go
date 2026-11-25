@@ -297,7 +297,14 @@ func sessionFailure(ctx context.Context, err error, s *provider.SSH) error {
 // whether the port answers. The result is one line: callers that show an
 // error's last line (destroy's check for work) keep ssh's reason.
 func sshFailure(ctx context.Context, err error, cfg *config.Config, s *provider.SSH, o options, cmd string) error {
-	if err == nil || s == nil || ctx.Err() != nil || !sshFailed(err, s) {
+	if err == nil || s == nil || ctx.Err() != nil {
+		return err
+	}
+	var hk *provider.HostKeyError
+	if errors.As(err, &hk) {
+		return hostKeyFix(hk, cfg, o, cmd)
+	}
+	if !sshFailed(err, s) {
 		return err
 	}
 	if keyscanFailed(err) {
@@ -374,3 +381,29 @@ func printNextSteps(out io.Writer, cfg *config.Config, ref string) {
 func forLaptop(o options) bool {
 	return o.local && o.configFile == provider.RemoteConfig
 }
+
+// hostKeyFix ends a refused host key with where to set the key and the
+// command to run again. As in connectFix, the fingerprint is not filled in
+// from what the server offers: comparing it is the user's step.
+func hostKeyFix(hk *provider.HostKeyError, cfg *config.Config, o options, cmd string) error {
+	path := o.configFile
+	if path == "" {
+		path = boxConfigPath(cfg.Box)
+	}
+	why := fmt.Sprintf("%s is not a host keelbox has connected to, and no terminal is attached to confirm its host key. It offers %s.", hk.Host, hk.Fingerprints())
+	if hk.Want != "" {
+		why = fmt.Sprintf("%s does not offer the host key %s that target.ssh.host_key pins; it offers %s. keelbox did not connect; if the server was reinstalled, that is expected.", hk.Host, hk.Want, hk.Fingerprints())
+	}
+	return &hostKeyFixed{hk: hk, msg: fmt.Sprintf("%s Read the server's key in %s. In %s, under target.ssh, set host_key: %s to that key. Then run: keelbox %s %s",
+		why, compareHostKey, tildePath(path), hostKeyPlaceholder, cmd, boxRef(cfg, o.configFile))}
+}
+
+// hostKeyFixed is a refused host key with its fix; it unwraps to the
+// refusal, so callers that say more about it (connectFix) still find it.
+type hostKeyFixed struct {
+	hk  *provider.HostKeyError
+	msg string
+}
+
+func (e *hostKeyFixed) Error() string { return e.msg }
+func (e *hostKeyFixed) Unwrap() error { return e.hk }
