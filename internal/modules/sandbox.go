@@ -198,9 +198,11 @@ func sandboxFix(e *engine.Env) string {
 }
 
 // verifySandbox runs bwrap as the agent with a new network namespace, as
-// the CLIs' sandboxes do: what failed on 24.04 without the profile.
+// the CLIs' sandboxes do: what failed on 24.04 without the profile. It
+// mounts /proc in a PID namespace of its own, as Claude Code's and Codex's
+// sandboxes do, which an unprivileged container refuses (ADR 0097).
 func verifySandbox(ctx context.Context, e *engine.Env) engine.Finding {
-	c := system.As(e.Cfg.Users.Agent.Name, "bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--unshare-net", "--", "/usr/bin/true")
+	c := system.As(e.Cfg.Users.Agent.Name, "bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--unshare-pid", "--unshare-net", "--", "/usr/bin/true")
 	c.Timeout = 30 * time.Second
 	if r, err := e.X.Run(ctx, c); err != nil {
 		why := firstLineOf(r.Stderr)
