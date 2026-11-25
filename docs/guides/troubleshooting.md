@@ -112,6 +112,16 @@ lxc.cgroup2.devices.allow: c 10:200 rwm
 lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
 ```
 
+### The box cannot reach GitHub
+
+`acme reaches the internet over IPv6 only`, or `acme cannot reach github.com`. Caddy, mise, restic and the tmux plugins come from GitHub, which has no IPv6 address. Until a box is set up, apply checks it reaches github.com and stops before any change when it does not.
+
+Give the server IPv4 internet access (in your provider's console, or on its network), or route an IPv6-only server through NAT64 with DNS64. A private IPv4 address needs NAT. With IPv4, the reason in brackets says what failed: allow github.com on port 443, check the clock and DNS, or wait out a GitHub outage. Then apply again:
+
+```sh
+keelbox apply acme
+```
+
 ### Another keelbox apply is running
 
 An apply started on the box holds the lock. Wait, or look for a stuck one:

@@ -310,3 +310,49 @@ func TestSessionOptsGiveUpSooner(t *testing.T) {
 		t.Errorf("with LostAfter: %s", got)
 	}
 }
+
+// scp reads "host:path", so an IPv6 address goes in brackets; ssh takes it
+// bare.
+func TestSCPDestBracketsIPv6(t *testing.T) {
+	for host, want := range map[string]string{
+		"203.0.113.7":                         "admin@203.0.113.7",
+		"devbox.example":                      "admin@devbox.example",
+		"2001:db8::7":                         "admin@[2001:db8::7]",
+		"fd42:6b62:7636:0:216:3eff:fea0:8252": "admin@[fd42:6b62:7636:0:216:3eff:fea0:8252]",
+	} {
+		s := &SSH{User: "admin", Host: host}
+		if got := s.scpDest(); got != want {
+			t.Errorf("%s: scp target %q, want %q", host, got, want)
+		}
+		if got := s.dest(); got != "admin@"+host {
+			t.Errorf("%s: ssh target %q", host, got)
+		}
+	}
+}
+
+// upload hands scp the bracketed IPv6 target and the port, as recorded by
+// a fake scp on PATH.
+func TestUploadToAnIPv6Host(t *testing.T) {
+	dir := t.TempDir()
+	argv := filepath.Join(dir, "argv")
+	scp := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argv + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "scp"), []byte(scp), 0o755); err != nil { //nolint:gosec // G306: an executable
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	s := &SSH{Host: "2001:db8::7", Port: 2222, User: "admin", KnownHosts: filepath.Join(dir, "kh")}
+	if err := s.upload(context.Background(), filepath.Join(dir, "scp"), "/var/lib/keelbox/stage/keelbox"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(argv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if last := args[len(args)-1]; last != "admin@[2001:db8::7]:/var/lib/keelbox/stage/keelbox" {
+		t.Errorf("scp target %q", last)
+	}
+	if !strings.Contains(string(data), "-P\n2222\n") {
+		t.Errorf("scp port missing: %q", data)
+	}
+}

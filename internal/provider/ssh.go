@@ -154,6 +154,15 @@ func connectTimeout(n int) int {
 
 func (s *SSH) dest() string { return s.User + "@" + s.Host }
 
+// scpDest is dest for scp, whose "host:path" needs an IPv6 address in
+// brackets: user@[2001:db8::1]:path. ssh takes the address bare.
+func (s *SSH) scpDest() string {
+	if strings.Contains(s.Host, ":") {
+		return s.User + "@[" + s.Host + "]"
+	}
+	return s.dest()
+}
+
 func (s *SSH) sshArgs(remote string) []string {
 	args := append(s.baseOpts(), "-p", strconv.Itoa(s.Port), s.dest(), "--", remote)
 	return args
@@ -203,7 +212,7 @@ var uploadRetryWait = 2 * time.Second
 // and the copy changes nothing on the box until it is whole. The error
 // after the second failure says what to do.
 func (s *SSH) upload(ctx context.Context, local, remote string) error {
-	args := append(s.baseOpts(), "-q", "-P", strconv.Itoa(s.Port), local, s.dest()+":"+remote)
+	args := append(s.baseOpts(), "-q", "-P", strconv.Itoa(s.Port), local, s.scpDest()+":"+remote)
 	var err error
 	var errb bytes.Buffer
 	for try := 0; try < 2; try++ {

@@ -329,9 +329,10 @@ Flags:
 Each step is checked, changed if needed and checked again. A failed step stops the run, except an agent CLI that fails to install: the run continues and exits 1. Every apply is recorded in the [logbook](box-files.md#logbook).
 
 - With provider `ssh` and an `--ssh-user` other than `target.ssh.user`, apply runs twice: as that account, then as the admin. The second run locks [the image's default account](../guides/adopting-a-box.md#the-images-default-account).
+- In an LXC container without nesting, or without `/dev/net/tun` while Tailscale is on, apply stops before any change, exit 1, and prints the commands for the container's host: [an LXC container](../guides/troubleshooting.md#an-lxc-container).
+- An apply on a box never set up stops before any change, exit 1, when [it cannot reach github.com](../guides/troubleshooting.md#the-box-cannot-reach-github).
 - The first apply stops before any change, exit 1, when `plan --impact` marks an item. `--adopt` accepts them: [a machine already in use](../guides/machine-in-use.md).
 - A box last applied with a newer release is refused without `--allow-downgrade`: [updates](../guides/upgrades.md).
-- In an LXC container without nesting, or without `/dev/net/tun` while Tailscale is on, apply stops before any change, exit 1, and prints the commands for the container's host: [an LXC container](../guides/troubleshooting.md#an-lxc-container).
 - Only `apply` installs `/usr/local/bin/keelbox` on the box, keeping the binary it replaces for `rollback`.
 - Over SSH the apply runs on the box as `keelbox-apply-<id>.service`. keelbox retries a lost connection for 3 minutes, then exits 4.
 - The next `apply`, `up` or `status` reports once how a run this computer left ended. `apply` then exits with that result and applies nothing: [closing your laptop during setup](../guides/troubleshooting.md#closing-your-laptop-during-setup).
