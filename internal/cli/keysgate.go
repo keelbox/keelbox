@@ -198,7 +198,14 @@ func keysGate(e *engine.Env, removeKeys bool, stderr io.Writer) bool {
 	}
 	gone, err := keysTakenOff(e)
 	if err != nil {
-		failf(stderr, "%v, so keelbox cannot tell which SSH keys applies put on %s. Nothing has changed. See what it holds: sudo cat %s. If this config lists every key the box should have: keelbox apply %s --remove-keys\n", err, e.Cfg.Box, unreadablePath(err), e.Cfg.Box)
+		path := unreadablePath(err)
+		if path == KeysRecord {
+			// Without the record, the check reads the config copy, as on a
+			// box set up before it.
+			failf(stderr, "%v, so keelbox cannot tell which SSH keys applies put on %s. Nothing has changed. See what it holds: sudo cat %s. To check against the config the last apply left instead: sudo rm %s, then: keelbox apply %s\n", err, e.Cfg.Box, path, path, e.Cfg.Box)
+		} else {
+			failf(stderr, "%v, so keelbox cannot tell which SSH keys applies put on %s. Nothing has changed. See what it holds: sudo cat %s. If this config lists every key the box should have: keelbox apply %s --remove-keys\n", err, e.Cfg.Box, path, e.Cfg.Box)
+		}
 		return false
 	}
 	if len(gone) == 0 {
@@ -376,6 +383,10 @@ func rollbackConfig(x interface {
 		return "", false
 	}
 	copied, ok := copyKeys(data)
+	if !ok && !removeKeys {
+		failf(stderr, "%s is unreadable, so keelbox cannot tell which SSH keys applies put on %s. Nothing has changed. See what it holds: sudo cat %s. To roll back to the config applied before as it is: keelbox rollback %s --remove-keys\n", modules.ConfigPath, box, modules.ConfigPath, box)
+		return "", false
+	}
 	if !ok { // --remove-keys, so the config as it is
 		if rmErr := x.Remove(KeysRecord); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
 			failf(stderr, "rollback: %v. Nothing has changed. Check that root can remove %s, then: keelbox rollback %s --remove-keys\n", rmErr, KeysRecord, box)

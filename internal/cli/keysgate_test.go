@@ -264,14 +264,15 @@ func TestApplyKeepingKeys(t *testing.T) {
 	}
 }
 
-// A record that does not parse stops apply, with the flag that passes.
+// A record that does not parse stops apply, offering to remove it so the
+// check reads the config copy; the flag passes.
 func TestKeysGateUnreadableRecord(t *testing.T) {
 	x := system.NewFake()
 	x.AddFile(KeysRecord, "admin: [", 0o600)
 	c := &config.Config{Box: "acme"}
 	c.Users.Admin.SSHAuthorizedKeys = []string{laptopA}
 	var stderr bytes.Buffer
-	if keysGate(&engine.Env{X: x, Cfg: c}, false, &stderr) || !strings.HasSuffix(stderr.String(), "keelbox apply acme --remove-keys\n") {
+	if keysGate(&engine.Env{X: x, Cfg: c}, false, &stderr) || !strings.HasSuffix(stderr.String(), "sudo rm "+KeysRecord+", then: keelbox apply acme\n") {
 		t.Errorf("an unreadable record passed:\n%s", stderr.String())
 	}
 	if !keysGate(&engine.Env{X: x, Cfg: c}, true, &stderr) {
@@ -355,6 +356,19 @@ func TestRollbackConfig(t *testing.T) {
 	}
 	if data, _ := x.ReadFile(RollbackConfig); strings.Contains(string(data), "laptop-b") {
 		t.Errorf("rollback put the removed key back:\n%s", data)
+	}
+
+	// A copy keelbox cannot read, which the record saw: rollback stops
+	// rather than drop the record.
+	x = system.NewFake()
+	x.AddFile(modules.ConfigPath, "users: 5\n", 0o600)
+	recorded(t, x, laptopA, laptopB)
+	stderr.Reset()
+	if _, ok := rollbackConfig(x, "acme", false, &stderr); ok || !strings.HasSuffix(stderr.String(), "keelbox rollback acme --remove-keys\n") {
+		t.Errorf("rollback went ahead on an unreadable copy:\n%s", stderr.String())
+	}
+	if _, err := x.ReadFile(KeysRecord); err != nil {
+		t.Error("the record went")
 	}
 
 	// An account given with nothing under it gets the keys.
