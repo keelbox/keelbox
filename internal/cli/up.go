@@ -1356,7 +1356,13 @@ func (w *wizard) askKey(ctx context.Context, a *answers) error {
 		if err != nil {
 			return err
 		}
-		s.KeyFiles = []string{f}
+		pub, err := readPublicKey(config.ExpandHome(f))
+		if err != nil {
+			return err
+		}
+		// The key itself goes in the config, not its path: the path
+		// holds another key on another computer (ADR 0097).
+		s.Keys, s.KeyFiles = []string{pub}, []string{f}
 		w.remember("ssh-key", f)
 		return nil
 	}
@@ -1373,7 +1379,10 @@ func (w *wizard) askKey(ctx context.Context, a *answers) error {
 		}
 	}
 	a.pubKey = k.public
-	s.KeyFiles = []string{tildePath(k.pubPath)}
+	// The key itself goes in the config, not its path: the path holds
+	// another key on another computer (ADR 0097). KeyFiles stays for the
+	// messages that name the file.
+	s.Keys, s.KeyFiles = []string{k.public}, []string{tildePath(k.pubPath)}
 	w.remember("ssh-key", tildePath(k.privPath))
 	if !k.isDefault {
 		s.IdentityFile = tildePath(k.privPath)

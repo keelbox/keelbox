@@ -344,7 +344,8 @@ var commands = []cmdDoc{
 		},
 		flags: append(append([]flagDoc{}, remote...), fVerbose,
 			flagDoc{"--adopt", "accept what plan --impact marks on a machine in use, such as replacing Ubuntu's docker.io"},
-			flagDoc{"--allow-downgrade", "move the box to an older release"}),
+			flagDoc{"--allow-downgrade", "move the box to an older release"},
+			flagDoc{"--remove-keys", "take off SSH keys this config no longer lists"}),
 	},
 	{
 		name: "doctor", args: "[box]", group: "Maintain",
@@ -438,7 +439,8 @@ var commands = []cmdDoc{
 		},
 		flags: append(append([]flagDoc{}, remote...), fVerbose,
 			flagDoc{"--adopt", "accept what plan --impact marks on a machine in use, such as replacing Ubuntu's docker.io"},
-			flagDoc{"--allow-downgrade", "move this computer and the box to an older release"}),
+			flagDoc{"--allow-downgrade", "move this computer and the box to an older release"},
+			flagDoc{"--remove-keys", "take off SSH keys this config no longer lists"}),
 	},
 	{
 		name: "add", args: "[box] [what]", group: "Maintain",
@@ -460,7 +462,7 @@ var commands = []cmdDoc{
 		name: "rollback", args: "[box]", group: "Maintain",
 		summary:  "re-apply with the keelbox the box ran before",
 		examples: []example{{"keelbox rollback acme", ""}},
-		flags:    append(append([]flagDoc{}, remote...), fVerbose),
+		flags:    append(append([]flagDoc{}, remote...), fVerbose, flagDoc{"--remove-keys", "use the older config's SSH keys as they are"}),
 	},
 	{
 		name: "reboot", args: "[box]", group: "Maintain",

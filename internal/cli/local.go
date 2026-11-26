@@ -64,7 +64,7 @@ func runLocal(ctx context.Context, cmd string, cfg *config.Config, o options, st
 		return 1
 	}
 	if cmd == "rollback" {
-		return rollback(ctx, stdout, stderr)
+		return rollback(ctx, cfg.Box, o.removeKeys, stdout, stderr)
 	}
 	resolved, err := cfg.Resolve()
 	if err != nil {
@@ -108,6 +108,9 @@ func runLocal(ctx context.Context, cmd string, cfg *config.Config, o options, st
 			fail(stderr, err)
 			return 1
 		}
+		if !keysGate(env, o.removeKeys, stderr) {
+			return 1
+		}
 		if os.Getenv(envDetach) == "1" {
 			return startRun(ctx, env, o, stdout, stderr)
 		}
@@ -128,10 +131,12 @@ func runLocal(ctx context.Context, cmd string, cfg *config.Config, o options, st
 		if !firstApplyGate(ctx, env, modules.All(), stderr) {
 			return 1
 		}
-		out, errOut, done := applyView(resolved, o, stdout, stderr)
-		defer done()
-		env.Log = out
-		return Apply(ctx, env, modules.All(), from, out, errOut)
+		return applyKeepingKeys(env, o.removeKeys, stderr, func() int {
+			out, errOut, done := applyView(resolved, o, stdout, stderr)
+			defer done()
+			env.Log = out
+			return Apply(ctx, env, modules.All(), from, out, errOut)
+		})
 	case "doctor":
 		return Doctor(ctx, env, modules.All(), stdout)
 	case "status":
@@ -182,9 +187,28 @@ func lock() (func(), error) {
 // upgrade. That binary installs itself again, keeping the newer one as the
 // previous, so a second rollback undoes the first. The laptop's keelbox
 // moves the box forward again on its next apply.
-func rollback(ctx context.Context, stdout, stderr io.Writer) int {
+func rollback(ctx context.Context, box string, removeKeys bool, stdout, stderr io.Writer) int {
 	if _, err := os.Stat(modules.PreviousBinary); err != nil {
 		failf(stderr, "nothing to roll back to: %s does not exist (it is kept when an apply replaces keelbox)\n", modules.PreviousBinary)
+		return 1
+	}
+	// Under the apply lock, as an apply would be, and before anything
+	// changes: the config the older keelbox applies keeps the SSH keys
+	// applies put on the box (ADR 0097). The lock is let go before the
+	// older keelbox's apply takes it.
+	unlock, err := lock()
+	if err != nil {
+		fail(stderr, fmt.Errorf("%w. Wait for it to finish, then: keelbox rollback %s", err, box))
+		return 1
+	}
+	if err := os.MkdirAll(filepath.Dir(provider.RemoteBinary), 0o700); err != nil {
+		unlock()
+		failf(stderr, "rollback: %v. Nothing has changed. Check the disk has room (df -h /var/lib), then: keelbox rollback %s\n", err, box)
+		return 1
+	}
+	path, ok := rollbackConfig(&system.Real{}, box, removeKeys, stderr)
+	unlock()
+	if !ok {
 		return 1
 	}
 	// Run the previous keelbox from the stage, not from where it is kept:
@@ -192,21 +216,17 @@ func rollback(ctx context.Context, stdout, stderr io.Writer) int {
 	// one, so a second rollback undoes the first.
 	prev, err := os.ReadFile(modules.PreviousBinary)
 	if err != nil {
-		failf(stderr, "rollback: %v", err)
-		return 1
-	}
-	if err := os.MkdirAll(filepath.Dir(provider.RemoteBinary), 0o700); err != nil {
-		failf(stderr, "rollback: %v", err)
+		failf(stderr, "rollback: %v. The keelbox kept for a rollback cannot be read; move the box forward instead: keelbox apply %s\n", err, box)
 		return 1
 	}
 	if err := replaceExecutable(provider.RemoteBinary, prev); err != nil {
-		failf(stderr, "rollback: %v", err)
+		failf(stderr, "rollback: %v. Check the disk has room (df -h /var/lib), then: keelbox rollback %s\n", err, box)
 		return 1
 	}
-	cmd := exec.CommandContext(ctx, provider.RemoteBinary, "apply", "--local", "--allow-downgrade", modules.ConfigPath)
+	cmd := exec.CommandContext(ctx, provider.RemoteBinary, "apply", "--local", "--allow-downgrade", path)
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	if err := cmd.Run(); err != nil {
-		failf(stderr, "rollback: %v", err)
+		failf(stderr, "rollback: the older keelbox's apply failed (%v); its output is above. To move the box forward again instead: keelbox apply %s\n", err, box)
 		return 1
 	}
 	return 0

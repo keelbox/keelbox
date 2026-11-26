@@ -27,28 +27,28 @@ import (
 
 // options are the shared flags.
 type options struct {
-	local, verbose, yes, force, allowDowngrade, adopt, admin bool
-	sshUser, binary, box, session, provider                  string
-	configFile                                               string // the config path given or found
-	inUp                                                     bool   // run by keelbox up, which prints its own next steps
-	upLast                                                   bool   // up's closing apply, after the sign-ins: up says what is left
-	askSudo                                                  bool   // the SSH account's sudo asks for a password: run under sudo on the terminal
-	publicIP                                                 string // a cloud box's public address, from its provider: the box is told it (outsideAddrs)
-	list, overwrite                                          bool
-	impact, all, json                                        bool     // plan --impact, status --all; --json with either
-	api                                                      bool     // login --api: the sign-in for API billing
-	skill                                                    string   // keelbox skills --skill: the skills to copy, by name
-	remote                                                   []string // keelbox ssh BOX -- CMD: the command, one word per argument
-	hasRemote                                                bool     // a -- was given
-	name, remove, target, snapshot, signIn                   string
-	add                                                      string // add: what to add to the box
-	sub, channel                                             string // keelbox notify test --channel NAME
-	detail, area, send, show, del                            string // keelbox report, keelbox reports
-	why                                                      string // keelbox install: the agent's stated reason
-	status                                                   bool   // keelbox install --status
-	request                                                  string // keelbox approve, keelbox deny: the request ID
-	agentPermissions                                         string // keelbox up: users.agent.permissions
-	autoReboot                                               string // keelbox up: host.auto_reboot
+	local, verbose, yes, force, allowDowngrade, adopt, removeKeys, admin bool
+	sshUser, binary, box, session, provider                              string
+	configFile                                                           string // the config path given or found
+	inUp                                                                 bool   // run by keelbox up, which prints its own next steps
+	upLast                                                               bool   // up's closing apply, after the sign-ins: up says what is left
+	askSudo                                                              bool   // the SSH account's sudo asks for a password: run under sudo on the terminal
+	publicIP                                                             string // a cloud box's public address, from its provider: the box is told it (outsideAddrs)
+	list, overwrite                                                      bool
+	impact, all, json                                                    bool     // plan --impact, status --all; --json with either
+	api                                                                  bool     // login --api: the sign-in for API billing
+	skill                                                                string   // keelbox skills --skill: the skills to copy, by name
+	remote                                                               []string // keelbox ssh BOX -- CMD: the command, one word per argument
+	hasRemote                                                            bool     // a -- was given
+	name, remove, target, snapshot, signIn                               string
+	add                                                                  string // add: what to add to the box
+	sub, channel                                                         string // keelbox notify test --channel NAME
+	detail, area, send, show, del                                        string // keelbox report, keelbox reports
+	why                                                                  string // keelbox install: the agent's stated reason
+	status                                                               bool   // keelbox install --status
+	request                                                              string // keelbox approve, keelbox deny: the request ID
+	agentPermissions                                                     string // keelbox up: users.agent.permissions
+	autoReboot                                                           string // keelbox up: host.auto_reboot
 	// keelbox up.
 	size, location, agents, host, hostKey, sshKey, tokenFile string
 	profile                                                  string // aws: the AWS CLI profile
@@ -75,6 +75,7 @@ func flagSet(o *options, stderr io.Writer) *flag.FlagSet {
 	fs.BoolVar(&o.api, "api", false, "")
 	fs.BoolVar(&o.allowDowngrade, "allow-downgrade", false, "")
 	fs.BoolVar(&o.adopt, "adopt", false, "")
+	fs.BoolVar(&o.removeKeys, "remove-keys", false, "")
 	fs.BoolVar(&o.impact, "impact", false, "")
 	fs.BoolVar(&o.json, "json", false, "")
 	fs.StringVar(&o.sshUser, "ssh-user", "", "")

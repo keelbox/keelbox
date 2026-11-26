@@ -260,6 +260,7 @@ func TestBox(t *testing.T) {
 	checks(t, host, "")
 	isolationChecks(t, host, bootstrap)
 	symlinkChecks(t, host, cfg)
+	keysChecks(t, host, cfg)
 	permissionsChecks(t, host, cfg)
 	manualPermissionsChecks(t, host, box, cfg)
 	sessionChecks(t, host, box, cfg)

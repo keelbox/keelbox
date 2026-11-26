@@ -986,3 +986,74 @@ func manualPermissionsChecks(t *testing.T, host, box, cfg string) {
 		"agent asked for tree; waiting for approval", "installed tree for agent, approved by the owner", "the owner denied agent's request for pv")
 	logf(t, "PASS manual: the agent has no sudo and cannot approve, and the logbook has the request, the approval and the denial")
 }
+
+// keysChecks applies the box's config as a second computer would: its
+// ssh_authorized_key_files names a file that holds another key there. The
+// apply stops before any change, and both accounts keep the first key.
+// Only the agent's key file changes, so the admin, which the harness
+// logs in as, keeps its key even if the check ever failed to stop.
+// With both keys listed it adds the second; --remove-keys takes the
+// second off again, and the first stays (ADR 0097).
+func keysChecks(t *testing.T, host, cfg string) {
+	t.Helper()
+	second := filepath.Join(workDir, "kb-e2e-second")
+	if out, err := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "kb-e2e-second", "-f", second).CombinedOutput(); err != nil {
+		t.Fatalf("second key: %v %s", err, out)
+	}
+	defer os.Remove(second)
+	defer os.Remove(second + ".pub")
+	data, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(workDir, "kb-e2e-second-computer.yaml")
+	defer os.Remove(other)
+	write := func(files string) {
+		t.Helper()
+		admin, agent, ok := strings.Cut(string(data), "\n  agent:\n")
+		if !ok {
+			t.Fatalf("no agent in the config:\n%s", data)
+		}
+		s := admin + "\n  agent:\n" + strings.Replace(agent, "ssh_authorized_key_files: ["+keyPath+".pub]", "ssh_authorized_key_files: ["+files+"]", 1)
+		if s == string(data) {
+			t.Fatalf("the agent's key file is not in the config:\n%s", data)
+		}
+		if err := os.WriteFile(other, []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keys := func() string {
+		t.Helper()
+		return must(t, host, "admin", "sudo cat /home/admin/.ssh/authorized_keys /home/agent/.ssh/authorized_keys")
+	}
+	first, err := os.ReadFile(keyPath + ".pub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstKey := strings.Fields(string(first))[1]
+
+	write(second + ".pub")
+	out, err := kb(t, "apply", other)
+	if err == nil || !strings.Contains(out, "this apply would take 1 SSH key off") || !strings.Contains(out, "--remove-keys") {
+		t.Fatalf("an apply from a second computer did not stop: %v\n%s", err, out)
+	}
+	if got := keys(); strings.Count(got, firstKey) != 2 || strings.Contains(got, "kb-e2e-second") {
+		t.Fatalf("authorized_keys changed after the stop:\n%s", got)
+	}
+	logf(t, "PASS a second computer's apply stops before taking the first computer's key off")
+
+	write(keyPath + ".pub, " + second + ".pub")
+	if out, err := kb(t, "apply", other); err != nil {
+		t.Fatalf("apply with both keys: %v\n%s", err, out)
+	}
+	if got := keys(); strings.Count(got, "kb-e2e-second") != 1 {
+		t.Fatalf("the second key was not added to the agent:\n%s", got)
+	}
+	if out, err := kb(t, "apply", cfg, "--remove-keys"); err != nil {
+		t.Fatalf("apply --remove-keys: %v\n%s", err, out)
+	}
+	if got := keys(); strings.Count(got, firstKey) != 2 || strings.Contains(got, "kb-e2e-second") {
+		t.Fatalf("--remove-keys did not leave only the first key:\n%s", got)
+	}
+	logf(t, "PASS both keys listed adds the second; --remove-keys takes it off and keeps the first")
+}
