@@ -226,7 +226,7 @@ func rollback(ctx context.Context, box string, removeKeys bool, stdout, stderr i
 	cmd := exec.CommandContext(ctx, provider.RemoteBinary, "apply", "--local", "--allow-downgrade", path)
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	if err := cmd.Run(); err != nil {
-		failf(stderr, "rollback: %v", err)
+		failf(stderr, "rollback: the older keelbox's apply failed (%v); its output is above. To move the box forward again instead: keelbox apply %s\n", err, box)
 		return 1
 	}
 	return 0

@@ -18,9 +18,9 @@ Paths use the default account names, `admin` and `agent`. The root services that
 | `/var/lib/keelbox/keelbox.previous` | 0755 root | The keelbox it replaced, for `keelbox rollback`. |
 | `/var/lib/keelbox/logbook.jsonl` | 0644 root | The [logbook](#logbook). |
 | `/var/lib/keelbox/stage/keelbox` | 0755 root, dir 0700 | The binary uploaded for the current or last remote command (`/run` is `noexec`). |
-| `/var/lib/keelbox/stage/rollback.yaml` | 0600 root | The config a rollback applies when the one applied before lacks SSH keys a later apply added: that config with those keys kept. Kept until the next rollback. |
+| `/var/lib/keelbox/stage/rollback.yaml` | 0600 root | The config a rollback applies when the SSH keys of the one applied before are not those on the box: that config with the box's keys. Kept until the next rollback. |
 | `/etc/keelbox/keelbox.yaml` | 0600 root | The applied config, keys inlined, provider `local`. Commands on the box read it when no config is named. |
-| `/etc/keelbox/ssh-keys.yaml` | 0600 root | The SSH keys applies put on the admin and the agent. apply stops before taking one off unless given `--remove-keys`. |
+| `/etc/keelbox/ssh-keys.yaml` | 0600 root | The SSH keys applies put on the admin and the agent, and the sha256 of the config copy it saw. apply stops before taking one off unless given `--remove-keys`. |
 | `/etc/keelbox/AGENTS.md` | 0644 root | The primer: what keelbox tells the agent CLIs about the box. |
 | `/run/keelbox/` | tmpfs, dir 0700, files 0600 | During a remote run only: the shipped config (`run-<id>.yaml` for a detached apply) and the secrets the run needs: Tailscale auth key, backup credentials and password, and channel secrets as `notify.<channel>.<key>`. Deleted when the run ends (secrets once no apply runs), and gone at reboot. |
 | `/tmp/tmp.XXXXXXXXXX/` | dir 0700, the login account | At the start of a remote command only: scp uploads the binary, config and secrets here, and root moves them to the two places above before the command runs. Left behind if the upload or install fails. When sudo asks for a password, the output waits beside it in `tmp.XXXXXXXXXX.out`, 0600. Where `/tmp` is on disk, these files touch the disk. |

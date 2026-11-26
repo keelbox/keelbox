@@ -54,7 +54,7 @@ The guard compares release ids, not keelbox versions.
 keelbox rollback acme
 ```
 
-This applies the box again with the keelbox it ran before. The agent CLIs, projects, containers, volumes and sign-ins stay as they are. If the older keelbox refuses a config key it does not know, remove the key, apply, then roll back. It uses the config the apply before left on the box, with any SSH key a later apply added kept; `--remove-keys` leaves such keys out.
+This applies the box again with the keelbox it ran before. The agent CLIs, projects, containers, volumes and sign-ins stay as they are. If the older keelbox refuses a config key it does not know, remove the key, apply, then roll back. It uses the config the apply before left on the box, with the SSH keys left as applies put them, and lists any it keeps or leaves off; `--remove-keys` uses that config's keys as they are.
 
 The next `keelbox apply` from this computer moves the box forward again. To stay on the older release, install it here:
 

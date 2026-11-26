@@ -33,6 +33,15 @@ func lastApplied(t *testing.T, x *system.Fake, keys ...string) {
 	x.AddFile(modules.ConfigPath, b.String(), 0o600)
 }
 
+// recorded is the record an apply writes before its steps: keys for both
+// accounts, and the config copy there then.
+func recorded(t *testing.T, x *system.Fake, keys ...string) {
+	t.Helper()
+	if err := writeRecord(x, keysOnBox{Admin: keys, Agent: keys}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // The config as keelbox up wrote it before ADR 0097, applied from a second
 // computer: the key file holds that computer's key, so the first
 // computer's would come off both accounts. apply stops before any change
@@ -193,7 +202,8 @@ func TestRemoveKeysReachesTheBox(t *testing.T) {
 // The apply sequence: the check again under the lock, then the config's
 // keys recorded before the steps. A failed apply leaves them recorded;
 // with --remove-keys the keys it takes off are not kept, so a step that
-// fails later does not make every next apply stop.
+// fails later, before or after the config copy, does not make every next
+// apply stop.
 func TestApplyKeepingKeys(t *testing.T) {
 	cfg := func(keys ...string) *config.Config {
 		c := &config.Config{Box: "acme"}
@@ -238,6 +248,20 @@ func TestApplyKeepingKeys(t *testing.T) {
 	if fi := x.Files[KeysRecord]; fi == nil || fi.Mode != 0o600 || fi.Owner != "root" {
 		t.Errorf("record file %+v", fi)
 	}
+
+	// B's laptop is lost: --remove-keys from A, and a step before the
+	// config copy fails, so the copy still lists B. The next apply goes
+	// ahead without the flag and does not offer B's key back.
+	x = system.NewFake()
+	lastApplied(t, x, laptopA, laptopB)
+	recorded(t, x, laptopA, laptopB)
+	if code := applyKeepingKeys(&engine.Env{X: x, Cfg: cfg(laptopA)}, true, &stderr, func() int { return 1 }); code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	stderr.Reset()
+	if code := applyKeepingKeys(&engine.Env{X: x, Cfg: cfg(laptopA)}, false, &stderr, func() int { return 0 }); code != 0 {
+		t.Fatalf("after a failed --remove-keys apply, the next one stopped: exit %d\n%s", code, stderr.String())
+	}
 }
 
 // A record that does not parse stops apply, with the flag that passes.
@@ -262,17 +286,18 @@ func TestKeysGateUnreadableRecord(t *testing.T) {
 	}
 }
 
-// Rollback applies the config the apply before left. When a later apply
-// that added a key failed before it copied its config, that config lacks
-// the key: rollback keeps it, in a copy with the key added, so the
-// computer that added it is not locked out. --remove-keys applies the
-// config as it is. The record goes either way, as the older keelbox may
-// not keep it; one keelbox cannot read stops rollback.
+// Rollback applies the config the apply before left, with its SSH keys
+// those applies put on the box. When a later apply that added a key failed
+// before it copied its config, that config lacks the key: rollback keeps
+// it, so the computer that added it is not locked out. --remove-keys
+// applies the config as it is. A record or copy keelbox cannot read stops
+// rollback.
 func TestRollbackConfig(t *testing.T) {
+	// B's apply adds its key and fails before the config copy.
 	setup := func() *system.Fake {
 		x := system.NewFake()
 		lastApplied(t, x, laptopA)
-		x.AddFile(KeysRecord, "admin: [\""+laptopA+"\", \""+laptopB+"\"]\nagent: [\""+laptopA+"\", \""+laptopB+"\"]\n", 0o600)
+		recorded(t, x, laptopA, laptopB)
 		return x
 	}
 	var stderr bytes.Buffer
@@ -281,8 +306,7 @@ func TestRollbackConfig(t *testing.T) {
 	if !ok || path != RollbackConfig {
 		t.Fatalf("path %q ok %v\n%s", path, ok, stderr.String())
 	}
-	// It says which keys it keeps, and how to leave them out.
-	if got := stderr.String(); !strings.Contains(got, "rollback keeps 1 SSH key that a later apply put on acme") || !strings.Contains(got, "users.agent: ssh-ed25519 SHA256:") || !strings.HasSuffix(got, "keelbox rollback acme --remove-keys\n") {
+	if got := stderr.String(); !strings.Contains(got, "rollback leaves the SSH keys on acme as applies put them") || !strings.Contains(got, "keeps users.agent: ssh-ed25519 SHA256:") {
 		t.Errorf("rollback said:\n%s", got)
 	}
 	data, _ := x.ReadFile(RollbackConfig)
@@ -298,39 +322,53 @@ func TestRollbackConfig(t *testing.T) {
 	if !strings.HasPrefix(string(data), "# Applied by keelbox") {
 		t.Errorf("the rest of the config was not kept:\n%s", data)
 	}
-	// The record is the keys handed over, so an older apply that fails
-	// too still leaves B's key known to the next apply.
-	if r, _ := x.ReadFile(KeysRecord); strings.Count(string(r), "laptop-b") != 2 {
-		t.Errorf("record after rollback:\n%s", r)
-	}
-	e := &engine.Env{X: x, Cfg: &config.Config{Box: "acme"}}
-	e.Cfg.Users.Admin.SSHAuthorizedKeys = []string{laptopA}
-	e.Cfg.Users.Agent.SSHAuthorizedKeys = []string{laptopA}
-	if keysGate(e, false, &stderr) {
+	onlyA := &engine.Env{X: x, Cfg: &config.Config{Box: "acme"}}
+	onlyA.Cfg.Users.Admin.SSHAuthorizedKeys = []string{laptopA}
+	onlyA.Cfg.Users.Agent.SSHAuthorizedKeys = []string{laptopA}
+	// The older keelbox's apply fails too: B's key is still known.
+	if keysGate(onlyA, false, &stderr) {
 		t.Error("after a rollback whose apply failed, A's apply took B's key off unasked")
 	}
+	// It gets through and writes its copy: B's key is known from that.
+	x.AddFile(modules.ConfigPath, string(data), 0o600)
+	if keysGate(onlyA, false, &stderr) {
+		t.Error("after a rollback, A's apply took B's key off unasked")
+	}
 
-	// --remove-keys: the config applied before, as it is, and the record
-	// says so.
+	// --remove-keys: the config applied before, as it is.
 	x = setup()
 	if path, ok := rollbackConfig(x, "acme", true, &stderr); !ok || path != modules.ConfigPath {
 		t.Errorf("--remove-keys: path %q ok %v", path, ok)
 	}
-	if r, _ := x.ReadFile(KeysRecord); strings.Contains(string(r), "laptop-b") {
-		t.Errorf("record after rollback --remove-keys:\n%s", r)
+	if last, _, _ := lastKeys(x); len(last.Agent) != 1 {
+		t.Errorf("keys after rollback --remove-keys: %q", last.Agent)
 	}
 
-	// An account given with nothing under it still gets the keys.
-	merged, err := withKeys([]byte("version: 1\nbox: acme\nusers:\n  admin:\n"), []removedKey{{"users.admin", laptopB}, {"users.agent", laptopB}})
+	// A --remove-keys apply that took B off failed before the copy, which
+	// still lists B: rollback leaves B off, and says so.
+	x = system.NewFake()
+	lastApplied(t, x, laptopA, laptopB)
+	recorded(t, x, laptopA)
+	stderr.Reset()
+	if path, ok := rollbackConfig(x, "acme", false, &stderr); !ok || path != RollbackConfig || !strings.Contains(stderr.String(), "leaves off users.admin:") {
+		t.Errorf("path %q ok %v\n%s", path, ok, stderr.String())
+	}
+	if data, _ := x.ReadFile(RollbackConfig); strings.Contains(string(data), "laptop-b") {
+		t.Errorf("rollback put the removed key back:\n%s", data)
+	}
+
+	// An account given with nothing under it gets the keys.
+	merged, err := setKeys([]byte("version: 1\nbox: acme\nusers:\n  admin:\n"), keysOnBox{[]string{laptopB}, []string{laptopB}})
 	if err != nil || strings.Count(string(merged), "laptop-b") != 2 {
 		t.Errorf("null mapping: %v\n%s", err, merged)
 	}
 
-	// Nothing a later apply added: the config applied before.
+	// The keys as the config lists them, or no record: as it is, quietly.
 	x = system.NewFake()
 	lastApplied(t, x, laptopA)
-	if path, ok := rollbackConfig(x, "acme", false, &stderr); !ok || path != modules.ConfigPath {
-		t.Errorf("no record: path %q ok %v", path, ok)
+	stderr.Reset()
+	if path, ok := rollbackConfig(x, "acme", false, &stderr); !ok || path != modules.ConfigPath || stderr.Len() != 0 {
+		t.Errorf("no record: path %q ok %v\n%s", path, ok, stderr.String())
 	}
 
 	// A record keelbox cannot read, or one it did not write, stops.
@@ -345,20 +383,26 @@ func TestRollbackConfig(t *testing.T) {
 }
 
 // After a rollback to a keelbox from before the record, that keelbox's
-// applies change the config copy and not the record. A key one of them
-// added is in the copy alone: the check counts both, so it does not come
-// off unasked.
-func TestKeysGateCountsTheCopyToo(t *testing.T) {
+// applies change the config copy and not the record. The copy is not the
+// one the record saw, so the check reads the copy: a key that keelbox
+// added does not come off unasked, and one it took off does not come back.
+func TestKeysGateReadsANewerCopy(t *testing.T) {
 	const laptopD = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDdddddddddddddddddddddddddddddddddddddddddd laptop-d"
 	x := system.NewFake()
-	lastApplied(t, x, laptopA, laptopD)
-	x.AddFile(KeysRecord, "admin: [\""+laptopA+"\"]\nagent: [\""+laptopA+"\"]\n", 0o600)
+	lastApplied(t, x, laptopA, laptopB)
+	recorded(t, x, laptopA, laptopB)    // rollback's record
+	lastApplied(t, x, laptopA, laptopD) // the older keelbox's apply
 	c := &config.Config{Box: "acme"}
-	c.Users.Admin.SSHAuthorizedKeys = []string{laptopA, laptopB}
-	c.Users.Agent.SSHAuthorizedKeys = []string{laptopA, laptopB}
+	c.Users.Admin.SSHAuthorizedKeys = []string{laptopA}
+	c.Users.Agent.SSHAuthorizedKeys = []string{laptopA}
 	var stderr bytes.Buffer
-	if keysGate(&engine.Env{X: x, Cfg: c}, false, &stderr) || !strings.Contains(stderr.String(), "laptop-d") {
-		t.Errorf("a key only the copy holds came off unasked:\n%s", stderr.String())
+	if keysGate(&engine.Env{X: x, Cfg: c}, false, &stderr) || !strings.Contains(stderr.String(), "laptop-d") || strings.Contains(stderr.String(), "laptop-b") {
+		t.Errorf("gate:\n%s", stderr.String())
+	}
+	// A second rollback leaves B off quietly.
+	stderr.Reset()
+	if path, ok := rollbackConfig(x, "acme", false, &stderr); !ok || path != modules.ConfigPath || stderr.Len() != 0 {
+		t.Errorf("second rollback: path %q ok %v\n%s", path, ok, stderr.String())
 	}
 	// The message names the file that cannot be read.
 	x = system.NewFake()
