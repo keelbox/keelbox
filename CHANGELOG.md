@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.1](https://github.com/keelbox/keelbox/compare/v0.2.0...v0.2.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **cli:** a refused host key names the config file and the command to run ([#21](https://github.com/keelbox/keelbox/issues/21)) ([7334c48](https://github.com/keelbox/keelbox/commit/7334c48141f1056783d738c4bcb151d493ba800e))
+* **cli:** an apply from a second computer no longer takes the first one's key off ([#24](https://github.com/keelbox/keelbox/issues/24)) ([126079e](https://github.com/keelbox/keelbox/commit/126079ecbdafac693d5b9a1aa41470c8db7ab662))
+* **doctor:** read sshd's config before the first SSH connection after a boot ([#20](https://github.com/keelbox/keelbox/issues/20)) ([7a27d77](https://github.com/keelbox/keelbox/commit/7a27d77504fddbedb8911a5e9790c841416007ea))
+* **watch:** reopen conversations after any orderly reboot ([#19](https://github.com/keelbox/keelbox/issues/19)) ([16ec105](https://github.com/keelbox/keelbox/commit/16ec1059d2609840fcafc659ff0b6e9402b031c9))
+
 ## [0.2.0](https://github.com/keelbox/keelbox/compare/v0.1.1...v0.2.0) (2026-11-25)
 
 
