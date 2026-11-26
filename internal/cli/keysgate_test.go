@@ -99,8 +99,8 @@ func TestKeysGateSecondComputer(t *testing.T) {
 	}
 }
 
-// A first apply, the same keys with other comments, an added key, and a
-// last config keelbox cannot read take nothing off.
+// A first apply, the same keys with other comments and an added key take
+// nothing off.
 func TestKeysGateTakesNothingOff(t *testing.T) {
 	cfg := func(keys ...string) *config.Config {
 		c := &config.Config{Box: "acme"}
@@ -118,7 +118,6 @@ func TestKeysGateTakesNothingOff(t *testing.T) {
 		{name: "same keys", last: []string{laptopA}, now: cfg(laptopA)},
 		{name: "another comment", last: []string{laptopA}, now: cfg(strings.TrimSuffix(laptopA, "laptop-a") + "renamed")},
 		{name: "a key added", last: []string{laptopA}, now: cfg(laptopA, laptopB)},
-		{name: "unreadable last config", raw: "version: [", now: cfg(laptopB)}, // the pre-record fallback only
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			x := system.NewFake()
@@ -254,6 +253,13 @@ func TestKeysGateUnreadableRecord(t *testing.T) {
 	if !keysGate(&engine.Env{X: x, Cfg: c}, true, &stderr) {
 		t.Error("--remove-keys stopped")
 	}
+	// No record, and a last config keelbox cannot read: it stops too.
+	x = system.NewFake()
+	x.AddFile(modules.ConfigPath, "version: [", 0o600)
+	stderr.Reset()
+	if keysGate(&engine.Env{X: x, Cfg: c}, false, &stderr) {
+		t.Errorf("an unreadable last config passed:\n%s", stderr.String())
+	}
 }
 
 // Rollback applies the config the apply before left. When a later apply
@@ -288,14 +294,32 @@ func TestRollbackConfig(t *testing.T) {
 	if !strings.HasPrefix(string(data), "# Applied by keelbox") {
 		t.Errorf("the rest of the config was not kept:\n%s", data)
 	}
-	if _, err := x.ReadFile(KeysRecord); err == nil {
-		t.Error("the record stayed for the older keelbox")
+	// The record is the keys handed over, so an older apply that fails
+	// too still leaves B's key known to the next apply.
+	if r, _ := x.ReadFile(KeysRecord); strings.Count(string(r), "laptop-b") != 2 {
+		t.Errorf("record after rollback:\n%s", r)
+	}
+	e := &engine.Env{X: x, Cfg: &config.Config{Box: "acme"}}
+	e.Cfg.Users.Admin.SSHAuthorizedKeys = []string{laptopA}
+	e.Cfg.Users.Agent.SSHAuthorizedKeys = []string{laptopA}
+	if keysGate(e, false, &stderr) {
+		t.Error("after a rollback whose apply failed, A's apply took B's key off unasked")
 	}
 
-	// --remove-keys: the config applied before, as it is.
+	// --remove-keys: the config applied before, as it is, and the record
+	// says so.
 	x = setup()
 	if path, ok := rollbackConfig(x, "acme", true, &stderr); !ok || path != modules.ConfigPath {
 		t.Errorf("--remove-keys: path %q ok %v", path, ok)
+	}
+	if r, _ := x.ReadFile(KeysRecord); strings.Contains(string(r), "laptop-b") {
+		t.Errorf("record after rollback --remove-keys:\n%s", r)
+	}
+
+	// An account given with nothing under it still gets the keys.
+	merged, err := withKeys([]byte("version: 1\nbox: acme\nusers:\n  admin:\n"), []removedKey{{"users.admin", laptopB}, {"users.agent", laptopB}})
+	if err != nil || strings.Count(string(merged), "laptop-b") != 2 {
+		t.Errorf("null mapping: %v\n%s", err, merged)
 	}
 
 	// Nothing a later apply added: the config applied before.

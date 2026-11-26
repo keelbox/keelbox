@@ -18,7 +18,7 @@ Paths use the default account names, `admin` and `agent`. The root services that
 | `/var/lib/keelbox/keelbox.previous` | 0755 root | The keelbox it replaced, for `keelbox rollback`. |
 | `/var/lib/keelbox/logbook.jsonl` | 0644 root | The [logbook](#logbook). |
 | `/var/lib/keelbox/stage/keelbox` | 0755 root, dir 0700 | The binary uploaded for the current or last remote command (`/run` is `noexec`). |
-| `/var/lib/keelbox/stage/rollback.yaml` | 0600 root | The config a rollback applies when the one applied before lacks SSH keys a later apply added: that config with those keys kept. |
+| `/var/lib/keelbox/stage/rollback.yaml` | 0600 root | The config a rollback applies when the one applied before lacks SSH keys a later apply added: that config with those keys kept. Kept until the next rollback. |
 | `/etc/keelbox/keelbox.yaml` | 0600 root | The applied config, keys inlined, provider `local`. Commands on the box read it when no config is named. |
 | `/etc/keelbox/ssh-keys.yaml` | 0600 root | The SSH keys applies put on the admin and the agent. apply stops before taking one off unless given `--remove-keys`. |
 | `/etc/keelbox/AGENTS.md` | 0644 root | The primer: what keelbox tells the agent CLIs about the box. |
