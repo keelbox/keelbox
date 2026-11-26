@@ -462,7 +462,7 @@ var commands = []cmdDoc{
 		name: "rollback", args: "[box]", group: "Maintain",
 		summary:  "re-apply with the keelbox the box ran before",
 		examples: []example{{"keelbox rollback acme", ""}},
-		flags:    append(append([]flagDoc{}, remote...), fVerbose, flagDoc{"--remove-keys", "take off SSH keys a later apply added"}),
+		flags:    append(append([]flagDoc{}, remote...), fVerbose, flagDoc{"--remove-keys", "leave out SSH keys a later apply added"}),
 	},
 	{
 		name: "reboot", args: "[box]", group: "Maintain",

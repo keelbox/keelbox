@@ -648,7 +648,7 @@ Flags:
   --binary PATH    keelbox binary to upload (default: this one, keelbox-linux-<arch> beside it, or
                    the same release, downloaded and verified)
   --verbose        print every step and every command run on the box, instead of the progress view
-  --remove-keys    take off SSH keys a later apply added
+  --remove-keys    leave out SSH keys a later apply added
 ```
 <!-- keelbox rollback --help: end -->
 

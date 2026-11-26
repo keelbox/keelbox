@@ -192,6 +192,25 @@ func rollback(ctx context.Context, box string, removeKeys bool, stdout, stderr i
 		failf(stderr, "nothing to roll back to: %s does not exist (it is kept when an apply replaces keelbox)\n", modules.PreviousBinary)
 		return 1
 	}
+	// Under the apply lock, as an apply would be, and before anything
+	// changes: the config the older keelbox applies keeps the SSH keys
+	// applies put on the box (ADR 0097). The lock is let go before the
+	// older keelbox's apply takes it.
+	unlock, err := lock()
+	if err != nil {
+		fail(stderr, fmt.Errorf("%w. Wait for it to finish, then: keelbox rollback %s", err, box))
+		return 1
+	}
+	if err := os.MkdirAll(filepath.Dir(provider.RemoteBinary), 0o700); err != nil {
+		unlock()
+		failf(stderr, "rollback: %v", err)
+		return 1
+	}
+	path, ok := rollbackConfig(&system.Real{}, box, removeKeys, stderr)
+	unlock()
+	if !ok {
+		return 1
+	}
 	// Run the previous keelbox from the stage, not from where it is kept:
 	// apply then swaps the two, keeping the current binary as the previous
 	// one, so a second rollback undoes the first.
@@ -200,29 +219,11 @@ func rollback(ctx context.Context, box string, removeKeys bool, stdout, stderr i
 		failf(stderr, "rollback: %v", err)
 		return 1
 	}
-	if err := os.MkdirAll(filepath.Dir(provider.RemoteBinary), 0o700); err != nil {
-		failf(stderr, "rollback: %v", err)
-		return 1
-	}
 	if err := replaceExecutable(provider.RemoteBinary, prev); err != nil {
 		failf(stderr, "rollback: %v", err)
 		return 1
 	}
-	// Under the apply lock, as an apply would be: rollback stops before
-	// taking off keys a later apply put on the box, and otherwise removes
-	// the record, which an older keelbox would not keep (ADR 0097). The
-	// lock is let go before the older keelbox's apply takes it.
-	unlock, err := lock()
-	if err != nil {
-		fail(stderr, err)
-		return 1
-	}
-	ok := rollbackKeys(&system.Real{}, box, removeKeys, stderr)
-	unlock()
-	if !ok {
-		return 1
-	}
-	cmd := exec.CommandContext(ctx, provider.RemoteBinary, "apply", "--local", "--allow-downgrade", modules.ConfigPath)
+	cmd := exec.CommandContext(ctx, provider.RemoteBinary, "apply", "--local", "--allow-downgrade", path)
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	if err := cmd.Run(); err != nil {
 		failf(stderr, "rollback: %v", err)

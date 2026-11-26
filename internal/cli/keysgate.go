@@ -53,13 +53,20 @@ var errRecord = errors.New("unreadable")
 func lastKeys(x interface {
 	ReadFile(string) ([]byte, error)
 }) (k keysOnBox, found bool, err error) {
-	if data, rerr := x.ReadFile(KeysRecord); rerr == nil {
-		if yaml.Unmarshal(data, &k) != nil {
-			return k, true, errRecord
+	data, rerr := x.ReadFile(KeysRecord)
+	if rerr == nil {
+		// keelbox always writes both lists; a record without them is
+		// not one it wrote.
+		var shape map[string]any
+		if yaml.Unmarshal(data, &k) != nil || yaml.Unmarshal(data, &shape) != nil || shape["admin"] == nil && shape["agent"] == nil {
+			return keysOnBox{}, true, errRecord
 		}
 		return k, true, nil
 	}
-	data, rerr := x.ReadFile(modules.ConfigPath)
+	if !errors.Is(rerr, fs.ErrNotExist) {
+		return k, true, errRecord
+	}
+	data, rerr = x.ReadFile(modules.ConfigPath)
 	if rerr != nil {
 		return k, false, nil
 	}
@@ -251,32 +258,86 @@ func applyKeepingKeys(e *engine.Env, removeKeys bool, stderr io.Writer, apply fu
 	return apply()
 }
 
-// rollbackKeys stops a rollback that would take off keys a later apply
-// put on the box: rollback applies the config the apply before left in
-// /etc/keelbox, which may lack them, as when an apply that added a
-// computer's key failed after it. --remove-keys lets it. Otherwise the
-// record is removed, since the older keelbox may not keep it.
-func rollbackKeys(x interface {
+// RollbackConfig is the config rollback applies when the one the apply
+// before left lacks keys in the record.
+const RollbackConfig = "/var/lib/keelbox/stage/rollback.yaml"
+
+// rollbackConfig is the config rollback has the older keelbox apply. That
+// is the config the apply before left in /etc/keelbox, which lacks a key a
+// later apply added and then failed before copying its config; rollback is
+// most often run then. The record holds only keys the user's applies
+// asked for, so they are kept: added to that config's key lists, written
+// to RollbackConfig. --remove-keys applies the config as it is. The record
+// is removed after, as the older keelbox may not keep it. A record keelbox
+// cannot read stops rollback unless --remove-keys.
+func rollbackConfig(x interface {
 	ReadFile(string) ([]byte, error)
+	WriteFile(string, []byte, fs.FileMode, string, string) error
 	Remove(string) error
-}, box string, removeKeys bool, stderr io.Writer) bool {
+}, box string, removeKeys bool, stderr io.Writer) (string, bool) {
+	path := modules.ConfigPath
 	last, found, err := lastKeys(x)
+	if err != nil && !removeKeys {
+		failf(stderr, "%s is %s, so keelbox cannot tell which SSH keys applies put on %s. Nothing has changed. To roll back to the config applied before, keys as it lists them: keelbox rollback %s --remove-keys\n", KeysRecord, err, box, box)
+		return "", false
+	}
 	if found && err == nil && !removeKeys {
 		data, rerr := x.ReadFile(modules.ConfigPath)
 		if copied, ok := copyKeys(data); rerr == nil && ok {
 			if gone := takenOff(last, copied); len(gone) > 0 {
-				failf(stderr, "a rollback to the config applied before would take SSH keys off %s that a later apply put there. Nothing has changed.\n", box)
-				for _, k := range gone {
-					fmt.Fprintf(stderr, "  %s: %s\n", k.account, keyLabel(k.key))
+				merged, merr := withKeys(data, gone)
+				if merr != nil {
+					failf(stderr, "rollback: adding the SSH keys applies put on %s to the config applied before: %v. Nothing has changed. To roll back without them: keelbox rollback %s --remove-keys\n", box, merr, box)
+					return "", false
 				}
-				fmt.Fprintf(stderr, "\nTo keep them, apply the config that lists them instead of rolling back: keelbox apply %s. To roll back and take them off: keelbox rollback %s --remove-keys\n", box, box)
-				return false
+				if werr := x.WriteFile(RollbackConfig, merged, 0o600, "root", "root"); werr != nil {
+					failf(stderr, "rollback: %v. Nothing has changed. Check that root can write %s, then: keelbox rollback %s\n", werr, RollbackConfig, box)
+					return "", false
+				}
+				path = RollbackConfig
 			}
 		}
 	}
 	if err := x.Remove(KeysRecord); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		failf(stderr, "rollback: %v", err)
-		return false
+		failf(stderr, "rollback: %v. Nothing has changed. Check that root can remove %s, then: keelbox rollback %s\n", err, KeysRecord, box)
+		return "", false
 	}
-	return true
+	return path, true
+}
+
+// withKeys adds keys to a config's ssh_authorized_keys, account by
+// account, and leaves the rest of it as it is.
+func withKeys(data []byte, add []removedKey) ([]byte, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, err
+	}
+	if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil, errors.New("not a YAML mapping")
+	}
+	child := func(m *yaml.Node, key string, kind yaml.Kind) *yaml.Node {
+		for i := 0; i+1 < len(m.Content); i += 2 {
+			if m.Content[i].Value == key {
+				return m.Content[i+1]
+			}
+		}
+		v := &yaml.Node{Kind: kind}
+		if kind == yaml.MappingNode {
+			v.Tag = "!!map"
+		} else {
+			v.Tag = "!!seq"
+		}
+		m.Content = append(m.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, v)
+		return v
+	}
+	users := child(doc.Content[0], "users", yaml.MappingNode)
+	for _, k := range add {
+		acct := child(users, strings.TrimPrefix(k.account, "users."), yaml.MappingNode)
+		keys := child(acct, "ssh_authorized_keys", yaml.SequenceNode)
+		if keys.Kind != yaml.SequenceNode {
+			return nil, fmt.Errorf("%s.ssh_authorized_keys is not a list", k.account)
+		}
+		keys.Content = append(keys.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Style: yaml.DoubleQuotedStyle, Value: k.key})
+	}
+	return yaml.Marshal(&doc)
 }
