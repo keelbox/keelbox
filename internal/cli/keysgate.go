@@ -42,42 +42,60 @@ func configKeys(c *config.Config) (keysOnBox, error) {
 	return keysOnBox{admin, agent}, nil
 }
 
-// errRecord is a record keelbox cannot read.
-var errRecord = errors.New("unreadable")
+// unreadable is a record, or a config copy, keelbox cannot read: the
+// check cannot pass on it.
+type unreadable struct{ path string }
 
-// lastKeys reads the record, or on a box set up before it existed, the
-// config the last apply left: only its key lists, so a key keelbox no
+func (u *unreadable) Error() string { return u.path + " is unreadable" }
+
+// lastKeys are the keys applies put on the box: the record's, and the key
+// lists of the config the last apply left, both. A keelbox from before the
+// record, run by rollback, updates the copy and not the record, so neither
+// is enough alone; only the copy's key lists are read, so a key keelbox no
 // longer knows elsewhere in it cannot make the check pass by default.
-// found is false on a box never applied. A record that does not parse is
-// errRecord: the check cannot pass on it.
+// found is false on a box never applied.
 func lastKeys(x interface {
 	ReadFile(string) ([]byte, error)
 }) (k keysOnBox, found bool, err error) {
 	data, rerr := x.ReadFile(KeysRecord)
-	if rerr == nil {
+	switch {
+	case rerr == nil:
 		// keelbox always writes both lists; a record without them is
 		// not one it wrote.
 		var shape map[string]any
 		if yaml.Unmarshal(data, &k) != nil || yaml.Unmarshal(data, &shape) != nil || shape["admin"] == nil && shape["agent"] == nil {
-			return keysOnBox{}, true, errRecord
+			return keysOnBox{}, true, &unreadable{KeysRecord}
 		}
-		return k, true, nil
-	}
-	if !errors.Is(rerr, fs.ErrNotExist) {
-		return k, true, errRecord
+		found = true
+	case !errors.Is(rerr, fs.ErrNotExist):
+		return keysOnBox{}, true, &unreadable{KeysRecord}
 	}
 	data, rerr = x.ReadFile(modules.ConfigPath)
-	if errors.Is(rerr, fs.ErrNotExist) {
-		return k, false, nil
+	switch {
+	case rerr == nil:
+		c, ok := copyKeys(data)
+		if !ok {
+			return keysOnBox{}, true, &unreadable{modules.ConfigPath}
+		}
+		k.Admin, k.Agent = mergeKeys(k.Admin, c.Admin), mergeKeys(k.Agent, c.Agent)
+		found = true
+	case !errors.Is(rerr, fs.ErrNotExist):
+		return keysOnBox{}, true, &unreadable{modules.ConfigPath}
 	}
-	if rerr != nil {
-		return k, true, errRecord
+	return k, found, nil
+}
+
+// mergeKeys is a then the keys of b it lacks, a key being its type and data.
+func mergeKeys(a, b []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, k := range append(append([]string(nil), a...), b...) {
+		if !seen[keyBlob(k)] {
+			seen[keyBlob(k)] = true
+			out = append(out, k)
+		}
 	}
-	k, ok := copyKeys(data)
-	if !ok {
-		return k, true, errRecord
-	}
-	return k, true, nil
+	return out
 }
 
 // copyKeys are the key lists of the config an apply left in /etc/keelbox.
@@ -147,19 +165,16 @@ func keysGate(e *engine.Env, removeKeys bool, stderr io.Writer) bool {
 	}
 	gone, err := keysTakenOff(e)
 	if err != nil {
-		failf(stderr, "%s is %s, so keelbox cannot tell which SSH keys applies put on %s. Nothing has changed. If this config lists every key the box should have: keelbox apply %s --remove-keys\n", KeysRecord, err, e.Cfg.Box, e.Cfg.Box)
+		failf(stderr, "%v, so keelbox cannot tell which SSH keys applies put on %s. Nothing has changed. See what it holds: sudo cat %s. If this config lists every key the box should have: keelbox apply %s --remove-keys\n", err, e.Cfg.Box, err.(*unreadable).path, e.Cfg.Box)
 		return false
 	}
 	if len(gone) == 0 {
 		return true
 	}
 	box := e.Cfg.Box
-	distinct := map[string]bool{}
-	for _, k := range gone {
-		distinct[keyBlob(k.key)] = true
-	}
-	one := len(distinct) == 1
-	failf(stderr, "this apply would take %s off %s that an apply put there. Nothing has changed.\n", plural(len(distinct), "SSH key", "SSH keys"), box)
+	n := distinctKeys(gone)
+	one := n == 1
+	failf(stderr, "this apply would take %s off %s that an apply put there. Nothing has changed.\n", plural(n, "SSH key", "SSH keys"), box)
 	for _, k := range gone {
 		fmt.Fprintf(stderr, "  %s: %s\n", k.account, keyLabel(k.key))
 	}
@@ -210,6 +225,15 @@ func takenOff(last, now keysOnBox) []removedKey {
 		}
 	}
 	return gone
+}
+
+// distinctKeys counts the keys in gone, a key on both accounts once.
+func distinctKeys(gone []removedKey) int {
+	seen := map[string]bool{}
+	for _, k := range gone {
+		seen[keyBlob(k.key)] = true
+	}
+	return len(seen)
 }
 
 // keyBlob is a key's type and data, without its comment: the same key with
@@ -296,13 +320,10 @@ func rollbackConfig(x interface {
 	WriteFile(string, []byte, fs.FileMode, string, string) error
 	MkdirAll(string, fs.FileMode, string, string) error
 }, box string, removeKeys bool, stderr io.Writer) (string, bool) {
-	unreadable := func(what string) (string, bool) {
-		failf(stderr, "%s is unreadable, so keelbox cannot tell which SSH keys applies put on %s. Nothing has changed. To roll back to the config applied before, keys as it lists them: keelbox rollback %s --remove-keys\n", what, box, box)
-		return "", false
-	}
 	last, found, err := lastKeys(x)
 	if err != nil && !removeKeys {
-		return unreadable(KeysRecord)
+		failf(stderr, "%v, so keelbox cannot tell which SSH keys applies put on %s. Nothing has changed. See what it holds: sudo cat %s. To roll back to the config applied before, keys as it lists them: keelbox rollback %s --remove-keys\n", err, box, err.(*unreadable).path, box)
+		return "", false
 	}
 	data, rerr := x.ReadFile(modules.ConfigPath)
 	if rerr != nil {
@@ -311,10 +332,7 @@ func rollbackConfig(x interface {
 	}
 	copied, ok := copyKeys(data)
 	if !ok {
-		if !removeKeys {
-			return unreadable(modules.ConfigPath)
-		}
-		return modules.ConfigPath, true
+		return modules.ConfigPath, true // --remove-keys: as it is
 	}
 	path, handed := modules.ConfigPath, copied
 	if found && err == nil && !removeKeys {
@@ -329,6 +347,12 @@ func rollbackConfig(x interface {
 				return "", false
 			}
 			path = RollbackConfig
+			n := distinctKeys(gone)
+			fmt.Fprintf(stderr, "keelbox: rollback keeps %s that a later apply put on %s, though the config applied before lacks %s:\n", plural(n, "SSH key", "SSH keys"), box, map[bool]string{true: "it", false: "them"}[n == 1])
+			for _, k := range gone {
+				fmt.Fprintf(stderr, "  %s: %s\n", k.account, keyLabel(k.key))
+			}
+			fmt.Fprintf(stderr, "keelbox: to leave them out instead: keelbox rollback %s --remove-keys\n", box)
 			for _, k := range gone {
 				if k.account == "users.admin" {
 					handed.Admin = append(handed.Admin, k.key)

@@ -281,6 +281,10 @@ func TestRollbackConfig(t *testing.T) {
 	if !ok || path != RollbackConfig {
 		t.Fatalf("path %q ok %v\n%s", path, ok, stderr.String())
 	}
+	// It says which keys it keeps, and how to leave them out.
+	if got := stderr.String(); !strings.Contains(got, "rollback keeps 1 SSH key that a later apply put on acme") || !strings.Contains(got, "users.agent: ssh-ed25519 SHA256:") || !strings.HasSuffix(got, "keelbox rollback acme --remove-keys\n") {
+		t.Errorf("rollback said:\n%s", got)
+	}
 	data, _ := x.ReadFile(RollbackConfig)
 	c, err := config.Parse(data, RollbackConfig)
 	if err != nil {
@@ -337,5 +341,31 @@ func TestRollbackConfig(t *testing.T) {
 		if _, ok := rollbackConfig(x, "acme", false, &stderr); ok || !strings.HasSuffix(stderr.String(), "keelbox rollback acme --remove-keys\n") {
 			t.Errorf("record %q: rollback went ahead:\n%s", bad, stderr.String())
 		}
+	}
+}
+
+// After a rollback to a keelbox from before the record, that keelbox's
+// applies change the config copy and not the record. A key one of them
+// added is in the copy alone: the check counts both, so it does not come
+// off unasked.
+func TestKeysGateCountsTheCopyToo(t *testing.T) {
+	const laptopD = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDdddddddddddddddddddddddddddddddddddddddddd laptop-d"
+	x := system.NewFake()
+	lastApplied(t, x, laptopA, laptopD)
+	x.AddFile(KeysRecord, "admin: [\""+laptopA+"\"]\nagent: [\""+laptopA+"\"]\n", 0o600)
+	c := &config.Config{Box: "acme"}
+	c.Users.Admin.SSHAuthorizedKeys = []string{laptopA, laptopB}
+	c.Users.Agent.SSHAuthorizedKeys = []string{laptopA, laptopB}
+	var stderr bytes.Buffer
+	if keysGate(&engine.Env{X: x, Cfg: c}, false, &stderr) || !strings.Contains(stderr.String(), "laptop-d") {
+		t.Errorf("a key only the copy holds came off unasked:\n%s", stderr.String())
+	}
+	// The message names the file that cannot be read.
+	x = system.NewFake()
+	x.AddFile(modules.ConfigPath, "version: [", 0o600)
+	stderr.Reset()
+	keysGate(&engine.Env{X: x, Cfg: c}, false, &stderr)
+	if !strings.Contains(stderr.String(), modules.ConfigPath+" is unreadable") || !strings.Contains(stderr.String(), "sudo cat "+modules.ConfigPath) {
+		t.Errorf("message:\n%s", stderr.String())
 	}
 }

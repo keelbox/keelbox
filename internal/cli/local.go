@@ -203,7 +203,7 @@ func rollback(ctx context.Context, box string, removeKeys bool, stdout, stderr i
 	}
 	if err := os.MkdirAll(filepath.Dir(provider.RemoteBinary), 0o700); err != nil {
 		unlock()
-		failf(stderr, "rollback: %v", err)
+		failf(stderr, "rollback: %v. Nothing has changed. Check the disk has room (df -h /var/lib), then: keelbox rollback %s\n", err, box)
 		return 1
 	}
 	path, ok := rollbackConfig(&system.Real{}, box, removeKeys, stderr)
@@ -216,11 +216,11 @@ func rollback(ctx context.Context, box string, removeKeys bool, stdout, stderr i
 	// one, so a second rollback undoes the first.
 	prev, err := os.ReadFile(modules.PreviousBinary)
 	if err != nil {
-		failf(stderr, "rollback: %v", err)
+		failf(stderr, "rollback: %v. The keelbox kept for a rollback cannot be read; move the box forward instead: keelbox apply %s\n", err, box)
 		return 1
 	}
 	if err := replaceExecutable(provider.RemoteBinary, prev); err != nil {
-		failf(stderr, "rollback: %v", err)
+		failf(stderr, "rollback: %v. Check the disk has room (df -h /var/lib), then: keelbox rollback %s\n", err, box)
 		return 1
 	}
 	cmd := exec.CommandContext(ctx, provider.RemoteBinary, "apply", "--local", "--allow-downgrade", path)
