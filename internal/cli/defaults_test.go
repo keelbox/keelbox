@@ -11,6 +11,8 @@ import (
 // Where "This machine" is the answer Enter takes, its row says why.
 func TestThisMachinePreselectedSaysWhy(t *testing.T) {
 	isolate(t)
+	defer func(s string) { hostOS = s }(hostOS)
+	hostOS = "linux"
 	defer func(f func() string) { localWhy = f }(localWhy)
 	localWhy = func() string { return "this is Ubuntu without a desktop session" }
 	ask := func(likely bool) string {
@@ -99,10 +101,10 @@ func TestThisMachineNotOfferedOffLinux(t *testing.T) {
 
 	// --provider local is refused before it is kept, with the routes that work.
 	forgetDraft()
-	w = &wizard{p: prompt.New(strings.NewReader(""), &b, true), out: &b, draft: &upDraft{Answers: map[string]string{}}}
+	w = &wizard{p: prompt.New(strings.NewReader(""), &b, true), out: &b, draft: &upDraft{Answers: map[string]string{}}, box: "acme"}
 	w.o.provider = viaLocal
 	err := w.askWhere(t.Context(), &answers{})
-	if err == nil || !strings.Contains(err.Error(), "this machine runs macOS") || !strings.Contains(err.Error(), "keelbox up --provider ssh") {
+	if err == nil || !strings.Contains(err.Error(), "this machine runs macOS") || !strings.Contains(err.Error(), "keelbox up acme --provider ssh") {
 		t.Errorf("--provider local on macOS: %v", err)
 	}
 	if _, ok := loadDraft(); ok {

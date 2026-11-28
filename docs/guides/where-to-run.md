@@ -37,7 +37,7 @@ What to install and how to narrow each sign-in: [cloud sign-ins and permissions]
 | What you need | SSH as root, or as an account with sudo | to paste a snippet keelbox prints into the provider's form | sudo |
 | Guide | [a server you already have](adopting-a-box.md) | [a server you already have](adopting-a-box.md) | [a machine already in use](machine-in-use.md) |
 
-`keelbox up` offers this machine only on Linux. A Mac or Windows computer manages boxes and cannot be one, but an Ubuntu VM on it can, set up as a server you reach over SSH.
+`keelbox up` offers this machine only on Linux. A Mac manages boxes and cannot be one, but an Ubuntu VM on it can, set up as a server you reach over SSH.
 
 None of these needs a token or a cloud sign-in. The firewall is UFW on the box, with no cloud firewall in front unless you add one.
 

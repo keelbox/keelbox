@@ -34,17 +34,18 @@ import (
 var hostOS = runtime.GOOS
 
 // localUnsupported refuses this machine as the box when it is not Linux:
-// a Mac or Windows computer manages boxes, and is never one. It names the
-// routes that work from here.
-func localUnsupported() error {
+// a Mac manages boxes, and is never one. It names the routes that work
+// from here, for the box named (box may be empty).
+func localUnsupported(box string) error {
 	if hostOS == "linux" {
 		return nil
 	}
-	name := map[string]string{"darwin": "macOS", "windows": "Windows"}[hostOS]
-	if name == "" {
-		name = hostOS
+	name := hostOS
+	if name == "darwin" {
+		name = "macOS"
 	}
-	return fmt.Errorf("this machine runs %s, and keelbox sets up Ubuntu, so it cannot be the box. From here, set up an Ubuntu server or VM you reach over SSH: keelbox up --provider ssh; or a new cloud server: keelbox up --provider hetzner; or, on the Ubuntu machine itself: curl -fsSL https://get.keelbox.dev | sh -s -- up", name)
+	up := strings.TrimSpace("keelbox up " + box)
+	return fmt.Errorf("this machine runs %s, and keelbox sets up Ubuntu, so it cannot be the box. From here, set up an Ubuntu server or VM you reach over SSH: %s --provider ssh; or a new cloud server: %s --provider hetzner (or aws, digitalocean or gcp); or, on the Ubuntu machine itself: curl -fsSL https://get.keelbox.dev | sh -s -- up", name, up, up)
 }
 
 // localLikely reports whether keelbox up was probably started on the box
@@ -76,7 +77,7 @@ var localWhy = func() string {
 // be Ubuntu, sudo must work (asked for now, once, not halfway through the
 // apply), and the probe says what is running here.
 func (w *wizard) prepareLocal(ctx context.Context, a *answers) error {
-	if err := localUnsupported(); err != nil {
+	if err := localUnsupported(w.box); err != nil {
 		return err
 	}
 	if os.Geteuid() != 0 {

@@ -640,8 +640,8 @@ func whereChoices() []prompt.Choice {
 		{Key: whereCloud, Label: "A new cloud server", Detail: "keelbox creates it at " + orList(names)},
 		{Key: viaCloudInit, Label: "A server I create myself (cloud-config)", Detail: "any provider: paste a snippet keelbox prints, no token"},
 	}
-	if localUnsupported() != nil {
-		// A Mac or Windows computer is never the box: offering it only
+	if localUnsupported("") != nil {
+		// A Mac is never the box: offering it only
 		// leads to a refusal, and a kept answer would repeat it.
 		choices = slices.DeleteFunc(choices, func(c prompt.Choice) bool { return c.Key == viaLocal })
 	}
@@ -949,7 +949,7 @@ func (w *wizard) askWhere(ctx context.Context, a *answers) error {
 			return fmt.Errorf("--provider %q: use %s", p, providerNames())
 		}
 		if p == viaLocal {
-			if err := localUnsupported(); err != nil {
+			if err := localUnsupported(w.box); err != nil {
 				return err // before it is kept, so keelbox up does not repeat it
 			}
 		}
