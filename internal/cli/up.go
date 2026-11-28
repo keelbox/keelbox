@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -633,12 +634,18 @@ func whereChoices() []prompt.Choice {
 	for _, e := range cloudEntries() {
 		names = append(names, e.name)
 	}
-	return []prompt.Choice{
+	choices := []prompt.Choice{
 		{Key: viaSSH, Label: "An existing server (SSH)", Detail: "a home server, mini PC, VM or VPS you reach over SSH"},
 		{Key: viaLocal, Label: "This machine", Detail: "set up the Ubuntu machine you are on, with sudo"},
 		{Key: whereCloud, Label: "A new cloud server", Detail: "keelbox creates it at " + orList(names)},
 		{Key: viaCloudInit, Label: "A server I create myself (cloud-config)", Detail: "any provider: paste a snippet keelbox prints, no token"},
 	}
+	if localUnsupported() != nil {
+		// A Mac or Windows computer is never the box: offering it only
+		// leads to a refusal, and a kept answer would repeat it.
+		choices = slices.DeleteFunc(choices, func(c prompt.Choice) bool { return c.Key == viaLocal })
+	}
+	return choices
 }
 
 // providerNames are the values --provider takes, as a sentence lists them.
@@ -941,6 +948,11 @@ func (w *wizard) askWhere(ctx context.Context, a *answers) error {
 		if _, cloud := cloudNamed(p); !cloud && p != viaSSH && p != viaLocal && p != viaCloudInit {
 			return fmt.Errorf("--provider %q: use %s", p, providerNames())
 		}
+		if p == viaLocal {
+			if err := localUnsupported(); err != nil {
+				return err // before it is kept, so keelbox up does not repeat it
+			}
+		}
 		a.via = p
 		w.remember("provider", p)
 		return nil
@@ -953,8 +965,8 @@ func (w *wizard) askWhere(ctx context.Context, a *answers) error {
 	// likely answer: keelbox up was started on the box itself. The row
 	// says why it is the one Enter takes.
 	def := 0
-	if localLikely() {
-		def = 1
+	if i := slices.IndexFunc(choices, func(c prompt.Choice) bool { return c.Key == viaLocal }); i >= 0 && localLikely() {
+		def = i
 		choices[def].Detail += "; preselected because " + localWhy()
 	}
 	i, err := w.p.Choose("Where should the box run?", choices, def)

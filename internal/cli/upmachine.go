@@ -30,10 +30,27 @@ import (
 // says what keelbox will change there, and offers to keep the services it
 // finds listening reachable on the LAN.
 
+// hostOS is the system keelbox runs on; tests replace it.
+var hostOS = runtime.GOOS
+
+// localUnsupported refuses this machine as the box when it is not Linux:
+// a Mac or Windows computer manages boxes, and is never one. It names the
+// routes that work from here.
+func localUnsupported() error {
+	if hostOS == "linux" {
+		return nil
+	}
+	name := map[string]string{"darwin": "macOS", "windows": "Windows"}[hostOS]
+	if name == "" {
+		name = hostOS
+	}
+	return fmt.Errorf("this machine runs %s, and keelbox sets up Ubuntu, so it cannot be the box. From here, set up an Ubuntu server or VM you reach over SSH: keelbox up --provider ssh; or a new cloud server: keelbox up --provider hetzner; or, on the Ubuntu machine itself: curl -fsSL https://get.keelbox.dev | sh -s -- up", name)
+}
+
 // localLikely reports whether keelbox up was probably started on the box
 // itself: run as root, or on Ubuntu with no graphical session.
 var localLikely = func() bool {
-	if runtime.GOOS != "linux" {
+	if hostOS != "linux" {
 		return false
 	}
 	if os.Geteuid() == 0 {
@@ -59,8 +76,8 @@ var localWhy = func() string {
 // be Ubuntu, sudo must work (asked for now, once, not halfway through the
 // apply), and the probe says what is running here.
 func (w *wizard) prepareLocal(ctx context.Context, a *answers) error {
-	if runtime.GOOS != "linux" {
-		return fmt.Errorf("this machine runs %s, and keelbox sets up Ubuntu. Set up a server from here: keelbox up --provider ssh; or on the Ubuntu machine itself: curl -fsSL https://get.keelbox.dev | sh -s -- up", runtime.GOOS)
+	if err := localUnsupported(); err != nil {
+		return err
 	}
 	if os.Geteuid() != 0 {
 		if w.p.Interactive() {

@@ -235,6 +235,9 @@ func upWith(t *testing.T, r *fakeRunner, input *string, args ...string) (int, st
 	// The default answer to "where" must not depend on the test machine.
 	defer func(f func() bool) { localLikely = f }(localLikely)
 	localLikely = func() bool { return false }
+	// Nor the rows it offers: scripts number them as on Linux.
+	defer func(s string) { hostOS = s }(hostOS)
+	hostOS = "linux"
 	// The git identity question is skipped, as --git-name "" skips it,
 	// unless the test is about it (withLaptopGit).
 	if !gitSet {
