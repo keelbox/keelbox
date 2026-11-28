@@ -44,7 +44,7 @@ It asks its questions in seven steps; Enter takes the highlighted answer. Ctrl-C
   ↑↓ move · 1-4 pick · Enter choose
 ```
 
-Choose 3, then Hetzner. Name the box: Enter takes `devbox`; this page uses `acme`.
+Choose 3, A new cloud server, then Hetzner. On a Mac the menu has no This machine row, so the cloud server is 2. Name the box: Enter takes `devbox`; this page uses `acme`.
 
 ### Step 2: Hetzner token
 

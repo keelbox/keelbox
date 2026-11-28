@@ -30,7 +30,15 @@ func loadDraft() (upDraft, bool) {
 		return upDraft{}, false
 	}
 	var d upDraft
-	if json.Unmarshal(data, &d) != nil || len(d.Answers) == 0 {
+	if json.Unmarshal(data, &d) != nil {
+		return upDraft{}, false
+	}
+	if d.Answers["provider"] == viaLocal && localUnsupported("") != nil {
+		// Kept by a keelbox that offered this machine on a Mac: carrying
+		// on with it would only be refused again, so the question is asked.
+		delete(d.Answers, "provider")
+	}
+	if len(d.Answers) == 0 {
 		return upDraft{}, false
 	}
 	return d, true

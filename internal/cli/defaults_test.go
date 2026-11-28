@@ -11,6 +11,8 @@ import (
 // Where "This machine" is the answer Enter takes, its row says why.
 func TestThisMachinePreselectedSaysWhy(t *testing.T) {
 	isolate(t)
+	defer func(s string) { hostOS = s }(hostOS)
+	hostOS = "linux"
 	defer func(f func() string) { localWhy = f }(localWhy)
 	localWhy = func() string { return "this is Ubuntu without a desktop session" }
 	ask := func(likely bool) string {
@@ -74,5 +76,54 @@ func TestRecommendedSizeIsPreselectedAndMarked(t *testing.T) {
 	recommend(small, 0)
 	if strings.Contains(small[0].Detail, "recommended") {
 		t.Errorf("a size too small for agents is recommended: %q", small[0].Detail)
+	}
+}
+
+// On a Mac, "This machine" is not offered: it can never be the box, and
+// a kept answer would make the next keelbox up fail the same way.
+func TestThisMachineNotOfferedOffLinux(t *testing.T) {
+	isolate(t)
+	defer func(s string) { hostOS = s }(hostOS)
+	hostOS = "darwin"
+	defer func(f func() bool) { localLikely = f }(localLikely)
+	localLikely = func() bool { return true }
+
+	var b strings.Builder
+	w := &wizard{p: prompt.New(strings.NewReader("\n"), &b, true), out: &b, draft: &upDraft{Answers: map[string]string{}}}
+	var a answers
+	if err := w.askWhere(t.Context(), &a); err != nil {
+		t.Fatal(err)
+	}
+	got := b.String()
+	if strings.Contains(got, "This machine") || !strings.Contains(got, "Choose 1-3 [1]: ") || a.via != viaSSH {
+		t.Errorf("this machine offered on macOS, or Enter took %q:\n%s", a.via, got)
+	}
+
+	// --provider local is refused before it is kept, with the routes that work.
+	forgetDraft()
+	w = &wizard{p: prompt.New(strings.NewReader(""), &b, true), out: &b, draft: &upDraft{Answers: map[string]string{}}, box: "acme"}
+	w.o.provider = viaLocal
+	err := w.askWhere(t.Context(), &answers{})
+	if err == nil || !strings.Contains(err.Error(), "this machine runs macOS") || !strings.Contains(err.Error(), "keelbox up acme --provider ssh") {
+		t.Errorf("--provider local on macOS: %v", err)
+	}
+	if _, ok := loadDraft(); ok {
+		t.Error("the refused answer was kept")
+	}
+
+	// A draft an older keelbox kept with this machine is not carried on.
+	d := upDraft{Answers: map[string]string{"provider": viaLocal}}
+	if err := d.save(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := loadDraft(); ok {
+		t.Error("a kept this-machine answer is still offered on macOS")
+	}
+	d.Answers["name"] = "acme"
+	if err := d.save(); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := loadDraft(); !ok || got.Answers["provider"] != "" || got.Answers["name"] != "acme" {
+		t.Errorf("draft with a name: %v %+v", ok, got)
 	}
 }
