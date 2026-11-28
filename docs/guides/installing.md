@@ -83,4 +83,10 @@ rm ~/.local/bin/keelbox ~/.local/share/bash-completion/completions/keelbox \
   ~/.local/share/zsh/site-functions/_keelbox ~/.config/fish/completions/keelbox.fish
 ```
 
-The installer's last line lists the files it wrote. Delete the `PATH` line it added, if any. Your boxes' configs stay in `~/.config/keelbox`; to remove a box, see [remove a box](removing-a-box.md).
+The installer's last line lists the files it wrote. Delete the `PATH` line it added, if any. Your boxes' configs stay in `~/.config/keelbox`; to remove a box, see [remove a box](removing-a-box.md). Once no box is left, remove the configs and the cache too:
+
+```sh
+rm -rf ~/.config/keelbox ~/Library/Caches/keelbox    # Linux: ~/.cache/keelbox
+```
+
+Installed with Homebrew: `brew uninstall keelbox`, then `brew untap keelbox/tap`.
