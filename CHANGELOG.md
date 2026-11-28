@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/keelbox/keelbox/compare/v0.2.1...v0.2.2) (2026-11-28)
+
+
+### Bug Fixes
+
+* **up:** a Mac is not offered as the box ([#25](https://github.com/keelbox/keelbox/issues/25)) ([4412de1](https://github.com/keelbox/keelbox/commit/4412de1faf4cbdee80d855dd00533852a1447090))
+
 ## [0.2.1](https://github.com/keelbox/keelbox/compare/v0.2.0...v0.2.1) (2026-11-26)
 
 
